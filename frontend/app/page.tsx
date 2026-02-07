@@ -21,22 +21,12 @@ export default function Home() {
     setError(null);
 
     try {
-      const response = await fetch("/api/sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: prompt.trim(),
-          agentCount,
-        }),
+      // For demo mode, redirect directly with prompt in search params
+      const params = new URLSearchParams({
+        prompt: prompt.trim(),
+        agents: String(agentCount),
       });
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to create session");
-      }
-
-      const data = await response.json();
-      router.push(`/session/${data.sessionId}`);
+      router.push(`/session/demo?${params.toString()}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
       setIsSubmitting(false);

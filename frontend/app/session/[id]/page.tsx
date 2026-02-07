@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useEffect, useState, useRef, Suspense } from "react";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { Socket } from "socket.io-client";
 import {
   Agent,
-  Task,
   ThinkingEntry,
   TaskCreatedEvent,
   TaskAssignedEvent,
@@ -16,35 +15,70 @@ import {
   SessionCompleteEvent,
 } from "@/lib/types";
 import { createSessionSocket } from "@/lib/socket-client";
-import { VMTab } from "@/components/vm-tab";
-import { ThinkingPanel } from "@/components/thinking-panel";
-import { SessionSummary } from "@/components/session-summary";
-import { Badge } from "@/components/ui/badge";
+import {
+  MOCK_PROMPT,
+  MOCK_AGENTS,
+  MOCK_THINKING_ENTRIES,
+  MOCK_AGENT_ACTIVITIES,
+} from "@/lib/mock-data";
+import { PromptBar } from "@/components/prompt-bar";
+import { AgentBrowser } from "@/components/agent-browser";
+import { ThinkingSidebar } from "@/components/thinking-sidebar";
 import { Loader2 } from "lucide-react";
 
-export default function SessionPage() {
+function SessionContent() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const router = useRouter();
+
   const sessionId = params.id as string;
+  const isMock = sessionId === "demo";
+
+  const prompt = searchParams.get("prompt") || MOCK_PROMPT;
+  const agentCountParam = parseInt(searchParams.get("agents") || "4", 10);
+
   const socketRef = useRef<Socket | null>(null);
 
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [thinkingEntries, setThinkingEntries] = useState<
-    Record<string, ThinkingEntry[]>
-  >({});
-  const [activeTab, setActiveTab] = useState<string>("");
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [isSessionComplete, setIsSessionComplete] = useState(false);
-  const [sessionData, setSessionData] = useState<SessionCompleteEvent | null>(
-    null
+  const [agents, setAgents] = useState<Agent[]>(
+    isMock ? MOCK_AGENTS.slice(0, agentCountParam) : []
   );
+  const [activeTab, setActiveTab] = useState(
+    isMock ? MOCK_AGENTS[0].id : ""
+  );
+  const [thinkingEntries, setThinkingEntries] = useState<ThinkingEntry[]>([]);
+  const [isLoading, setIsLoading] = useState(!isMock);
+  const [error, setError] = useState<string | null>(null);
 
+  // Mock mode: simulate streaming thinking entries
   useEffect(() => {
-    if (!sessionId) return;
+    if (!isMock) return;
 
-    const fetchSessionStatus = async () => {
+    const activeAgentIds = new Set(agents.map((a) => a.id));
+    const relevantEntries = MOCK_THINKING_ENTRIES.filter((e) =>
+      activeAgentIds.has(e.agentId)
+    );
+
+    const timers: NodeJS.Timeout[] = [];
+    relevantEntries.forEach((entry, index) => {
+      // First few entries appear quickly, then slow to a realistic pace
+      const delay =
+        index < 4 ? 400 + index * 600 : 2800 + (index - 4) * 1800;
+
+      timers.push(
+        setTimeout(() => {
+          setThinkingEntries((prev) => [...prev, entry]);
+        }, delay)
+      );
+    });
+
+    return () => timers.forEach(clearTimeout);
+  }, [isMock, agents]);
+
+  // Real mode: Socket.io connection
+  useEffect(() => {
+    if (isMock || !sessionId) return;
+
+    const fetchAndConnect = async () => {
       try {
         const response = await fetch(`/api/sessions/${sessionId}`);
         if (response.ok) {
@@ -55,22 +89,13 @@ export default function SessionPage() {
               setActiveTab(data.agents[0].id);
             }
           }
-          if (data.tasks) {
-            setTasks(data.tasks);
-          }
           if (data.status === "completed") {
-            setIsSessionComplete(true);
-            setSessionData({
-              sessionId,
-              tasks: data.tasks || [],
-              agents: data.agents || [],
-            });
             setIsLoading(false);
             return;
           }
         }
       } catch {
-        // Continue with Socket.io connection
+        // Continue with socket connection
       }
 
       const socket = createSessionSocket(sessionId);
@@ -90,36 +115,19 @@ export default function SessionPage() {
         socket.emit("join-session", sessionId);
       });
 
-      // Task events
       socket.on("task:created", (data: TaskCreatedEvent) => {
-        setTasks((prev) => [...prev, data.task]);
+        // Tasks tracked separately if needed
+        void data;
       });
 
       socket.on("task:assigned", (data: TaskAssignedEvent) => {
-        setTasks((prev) =>
-          prev.map((task) =>
-            task.id === data.taskId
-              ? {
-                  ...task,
-                  status: "assigned" as const,
-                  assignedTo: data.agentId,
-                }
-              : task
-          )
-        );
+        void data;
       });
 
       socket.on("task:completed", (data: { taskId: string }) => {
-        setTasks((prev) =>
-          prev.map((task) =>
-            task.id === data.taskId
-              ? { ...task, status: "completed" as const }
-              : task
-          )
-        );
+        void data;
       });
 
-      // Agent events
       socket.on(
         "agent:initialized",
         (data: { agentId: string; sessionId: string }) => {
@@ -157,49 +165,42 @@ export default function SessionPage() {
           timestamp: data.timestamp,
           action: data.action,
         };
-        setThinkingEntries((prev) => ({
-          ...prev,
-          [data.agentId]: [...(prev[data.agentId] || []), entry],
-        }));
+        setThinkingEntries((prev) => [...prev, entry]);
       });
 
       socket.on("agent:reasoning", (data: AgentReasoningEvent) => {
         if (data.actionId) {
-          setThinkingEntries((prev) => ({
-            ...prev,
-            [data.agentId]: (prev[data.agentId] || []).map((entry) =>
+          setThinkingEntries((prev) =>
+            prev.map((entry) =>
               entry.id === data.actionId
                 ? { ...entry, reasoning: data.reasoning }
                 : entry
-            ),
-          }));
+            )
+          );
         } else {
           setThinkingEntries((prev) => {
-            const entries = prev[data.agentId] || [];
-            const lastEntry = entries[entries.length - 1];
-            if (lastEntry && !lastEntry.reasoning) {
-              return {
-                ...prev,
-                [data.agentId]: entries.map((entry, idx) =>
-                  idx === entries.length - 1
-                    ? { ...entry, reasoning: data.reasoning }
-                    : entry
-                ),
-              };
+            const lastEntry = prev[prev.length - 1];
+            if (
+              lastEntry &&
+              lastEntry.agentId === data.agentId &&
+              !lastEntry.reasoning
+            ) {
+              return prev.map((entry, idx) =>
+                idx === prev.length - 1
+                  ? { ...entry, reasoning: data.reasoning }
+                  : entry
+              );
             }
-            return {
+            return [
               ...prev,
-              [data.agentId]: [
-                ...entries,
-                {
-                  id: `${data.agentId}-${Date.now()}-${Math.random()}`,
-                  agentId: data.agentId,
-                  timestamp: data.timestamp,
-                  action: "Reasoning",
-                  reasoning: data.reasoning,
-                },
-              ],
-            };
+              {
+                id: `${data.agentId}-${Date.now()}-${Math.random()}`,
+                agentId: data.agentId,
+                timestamp: data.timestamp,
+                action: "Reasoning",
+                reasoning: data.reasoning,
+              },
+            ];
           });
         }
       });
@@ -215,14 +216,13 @@ export default function SessionPage() {
       });
 
       socket.on("session:complete", (data: SessionCompleteEvent) => {
-        setIsSessionComplete(true);
-        setSessionData(data);
+        void data;
       });
 
       setIsLoading(false);
     };
 
-    fetchSessionStatus();
+    fetchAndConnect();
 
     return () => {
       if (socketRef.current) {
@@ -230,12 +230,7 @@ export default function SessionPage() {
         socketRef.current = null;
       }
     };
-  }, [sessionId]);
-
-  const completedCount = tasks.filter((t) => t.status === "completed").length;
-  const progressPercent =
-    tasks.length > 0 ? (completedCount / tasks.length) * 100 : 0;
-  const activeAgentCount = agents.filter((a) => a.status === "active").length;
+  }, [sessionId, isMock]);
 
   if (isLoading) {
     return (
@@ -266,16 +261,6 @@ export default function SessionPage() {
     );
   }
 
-  if (isSessionComplete && sessionData) {
-    return (
-      <SessionSummary
-        sessionId={sessionId}
-        tasks={sessionData.tasks}
-        agents={sessionData.agents}
-      />
-    );
-  }
-
   if (agents.length === 0) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -294,93 +279,49 @@ export default function SessionPage() {
       {/* Accent gradient line */}
       <div className="h-0.5 shrink-0 bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-500" />
 
-      {/* Header */}
-      <div className="shrink-0 border-b border-border px-5 py-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h1 className="text-sm font-semibold">
-              Session{" "}
-              <span className="font-mono text-muted-foreground">
-                {sessionId.slice(0, 8)}
-              </span>
-            </h1>
+      {/* Prompt bar */}
+      <PromptBar prompt={prompt} agentCount={agents.length} />
 
-            <div className="hidden sm:flex items-center gap-3">
-              <div className="h-4 w-px bg-border" />
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {completedCount}/{tasks.length} tasks
-              </span>
-              <div className="h-1.5 w-24 rounded-full bg-muted overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-primary transition-all duration-500"
-                  style={{ width: `${progressPercent}%` }}
-                />
-              </div>
-            </div>
-          </div>
-
-          <Badge variant="outline" className="gap-2">
-            <span className="size-2 rounded-full bg-emerald-400 animate-pulse" />
-            {activeAgentCount} active
-          </Badge>
-        </div>
-      </div>
-
-      {/* Tab bar */}
-      <div className="shrink-0 border-b border-border px-5 py-2">
-        <div className="flex gap-1">
-          {agents.map((agent) => (
-            <button
-              key={agent.id}
-              onClick={() => setActiveTab(agent.id)}
-              className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
-                activeTab === agent.id
-                  ? "bg-muted text-foreground"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-              }`}
-            >
-              <span
-                className={`size-1.5 rounded-full ${
-                  agent.status === "active"
-                    ? "bg-emerald-400"
-                    : agent.status === "terminated"
-                      ? "bg-zinc-600"
-                      : "bg-amber-400 animate-pulse"
-                }`}
-              />
-              Agent {agent.id.slice(0, 6)}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Main content */}
+      {/* Main content: browser + thinking sidebar */}
       <div className="flex flex-1 overflow-hidden">
-        {agents.map((agent) => (
-          <div
-            key={agent.id}
-            className={`flex-1 overflow-hidden ${
-              activeTab === agent.id ? "flex" : "hidden"
-            }`}
-          >
-            <div className="flex-1 overflow-hidden">
-              <VMTab
-                agentId={agent.id}
-                sessionId={sessionId}
-                streamUrl={agent.streamUrl}
-                isActive={activeTab === agent.id}
-              />
-            </div>
-            <div className="w-80 shrink-0 overflow-hidden">
-              <ThinkingPanel
-                agentId={agent.id}
-                sessionId={sessionId}
-                entries={thinkingEntries[agent.id] || []}
-              />
-            </div>
-          </div>
-        ))}
+        {/* Agent browser */}
+        <div className="flex-1 p-3 min-w-0">
+          <AgentBrowser
+            agents={agents}
+            activeAgentId={activeTab}
+            onTabChange={setActiveTab}
+            agentActivities={MOCK_AGENT_ACTIVITIES}
+          />
+        </div>
+
+        {/* Thinking sidebar */}
+        <div className="w-[360px] shrink-0">
+          <ThinkingSidebar
+            entries={thinkingEntries}
+            agents={agents}
+            agentActivities={MOCK_AGENT_ACTIVITIES}
+          />
+        </div>
       </div>
     </div>
+  );
+}
+
+function LoadingScreen() {
+  return (
+    <div className="flex min-h-screen items-center justify-center">
+      <div className="text-center space-y-3">
+        <Loader2 className="mx-auto size-6 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">Loading session...</p>
+      </div>
+    </div>
+  );
+}
+
+export default function SessionPage() {
+  return (
+    <Suspense fallback={<LoadingScreen />}>
+      <SessionContent />
+    </Suspense>
   );
 }
