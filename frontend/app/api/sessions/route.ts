@@ -3,8 +3,6 @@ import { v4 as uuidv4 } from "uuid";
 import Dedalus from "dedalus-labs";
 import { DedalusRunner } from "dedalus-labs";
 import { createSession, addTodos, getSession } from "@/lib/session-store";
-import { getIO } from "@/lib/socket";
-import { spawnWorkers } from "@/lib/worker-manager";
 
 let runner: DedalusRunner | null = null;
 
@@ -59,7 +57,7 @@ Rules:
       max_tokens: 1024,
     });
 
-    const raw = response.finalOutput
+    const raw = (response as { finalOutput: string }).finalOutput
       .replace(/^```(?:json)?\s*/i, "")
       .replace(/```\s*$/, "")
       .trim();
@@ -77,21 +75,12 @@ Rules:
     );
   }
 
-  // Add TODOs to session and emit events
+  // Add TODOs to session — do NOT start workers yet
   const todos = addTodos(sessionId, todoDescriptions);
 
-  try {
-    const io = getIO();
-    for (const todo of todos) {
-      io.to(`session:${sessionId}`).emit("task:created", todo);
-    }
-  } catch {
-    // Socket.io may not be initialized in test environments
-    console.warn("[orchestrator] Socket.io not available, skipping emit");
-  }
+  // Set session to pending_approval so the user can review tasks
+  const session = getSession(sessionId);
+  if (session) session.status = "pending_approval";
 
-  // Spawn worker processes
-  spawnWorkers(sessionId, agentCount);
-
-  return NextResponse.json({ sessionId }, { status: 201 });
+  return NextResponse.json({ sessionId, tasks: todos }, { status: 201 });
 }

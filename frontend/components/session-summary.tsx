@@ -12,12 +12,14 @@ interface SessionSummaryProps {
   sessionId: string;
   tasks: Task[];
   agents: Agent[];
+  whiteboard?: string;
 }
 
 export function SessionSummary({
   sessionId,
   tasks,
   agents,
+  whiteboard,
 }: SessionSummaryProps) {
   const router = useRouter();
   const completedTasks = tasks.filter((t) => t.status === "completed");
@@ -112,6 +114,20 @@ export function SessionSummary({
             );
           })}
         </div>
+
+        {/* Whiteboard */}
+        {whiteboard && (
+          <Card className="bg-card/50">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">Whiteboard</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <pre className="whitespace-pre-wrap text-sm text-muted-foreground leading-relaxed font-mono">
+                {whiteboard}
+              </pre>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Return button */}
         <div className="flex justify-center">

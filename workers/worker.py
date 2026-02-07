@@ -217,7 +217,7 @@ async def main():
 
             # Report task completion
             await emit(
-                "task:completed", {"taskId": task_id, "result": result}
+                "task:completed", {"todoId": task_id, "result": result}
             )
             logger.info("Completed task %s", task_id)
 

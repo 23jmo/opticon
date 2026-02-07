@@ -1,2 +1,3 @@
 dedalus-labs
 e2b-desktop
+python-socketio[asyncio_client]>=5.0.0

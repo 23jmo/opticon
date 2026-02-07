@@ -37,7 +37,7 @@ export function createSessionSocket(sessionId: string): Socket {
 
   // Join session room on connect
   sessionSocket.on("connect", () => {
-    sessionSocket.emit("join-session", sessionId);
+    sessionSocket.emit("session:join", sessionId);
   });
 
   return sessionSocket;

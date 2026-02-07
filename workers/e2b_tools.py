@@ -47,6 +47,12 @@ def move_mouse(x: int, y: int) -> str:
     return f"Moved mouse to ({x}, {y})"
 
 
+def scroll(x: int, y: int, direction: str = "down", amount: int = 3) -> str:
+    """Scroll at screen coordinates (x, y) in the given direction."""
+    _sandbox.scroll(x, y, direction=direction, amount=amount)
+    return f"Scrolled {direction} by {amount} at ({x}, {y})"
+
+
 # --- Dispatch map: name -> function ---
 
 TOOL_FUNCTIONS = {
@@ -55,10 +61,11 @@ TOOL_FUNCTIONS = {
     "type_text": type_text,
     "press_key": press_key,
     "move_mouse": move_mouse,
+    "scroll": scroll,
 }
 
 # --- OpenAI-compatible tool schemas for chat.completions.create() ---
-# No take_screenshot — screenshots are injected automatically as user messages.
+# No take_screenshot -- screenshots are injected automatically as user messages.
 
 TOOL_SCHEMAS = [
     {
@@ -131,6 +138,30 @@ TOOL_SCHEMAS = [
                     "y": {"type": "integer", "description": "Y coordinate"},
                 },
                 "required": ["x", "y"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "scroll",
+            "description": "Scroll at screen coordinates (x, y) in a direction. Use for scrolling web pages, documents, etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {"type": "integer", "description": "X coordinate"},
+                    "y": {"type": "integer", "description": "Y coordinate"},
+                    "direction": {
+                        "type": "string",
+                        "enum": ["up", "down", "left", "right"],
+                        "description": "Direction to scroll",
+                    },
+                    "amount": {
+                        "type": "integer",
+                        "description": "Number of scroll steps (default 3)",
+                    },
+                },
+                "required": ["x", "y", "direction"],
             },
         },
     },
