@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, use } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Socket } from "socket.io-client";
 import {
@@ -16,15 +16,14 @@ import {
   SessionCompleteEvent,
 } from "@/lib/types";
 import { createSessionSocket } from "@/lib/socket-client";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { VMTab } from "@/components/vm-tab";
 import { ThinkingPanel } from "@/components/thinking-panel";
 import { SessionSummary } from "@/components/session-summary";
-import { Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Loader2 } from "lucide-react";
 
 export default function SessionPage() {
-  const params = use(useParams());
+  const params = useParams();
   const router = useRouter();
   const sessionId = params.id as string;
   const socketRef = useRef<Socket | null>(null);
@@ -42,17 +41,14 @@ export default function SessionPage() {
     null
   );
 
-  // Initialize Socket.io connection and set up event listeners
   useEffect(() => {
     if (!sessionId) return;
 
-    // First, try to fetch session status for reconnection
     const fetchSessionStatus = async () => {
       try {
         const response = await fetch(`/api/sessions/${sessionId}`);
         if (response.ok) {
           const data = await response.json();
-          // Restore state from session data if available
           if (data.agents) {
             setAgents(data.agents);
             if (data.agents.length > 0) {
@@ -73,35 +69,24 @@ export default function SessionPage() {
             return;
           }
         }
-      } catch (err) {
-        console.error("Failed to fetch session status:", err);
-        // Continue with Socket.io connection anyway
+      } catch {
+        // Continue with Socket.io connection
       }
 
-      // Set up Socket.io connection
       const socket = createSessionSocket(sessionId);
       socketRef.current = socket;
 
-      // Set up event listeners
       socket.on("connect", () => {
-        console.log("Connected to session:", sessionId);
         setIsLoading(false);
         setError(null);
       });
 
-      socket.on("connect_error", (err) => {
-        console.error("Socket connection error:", err);
-        setError("Failed to connect to session. Please try again.");
+      socket.on("connect_error", () => {
+        setError("Failed to connect to session");
         setIsLoading(false);
       });
 
-      socket.on("disconnect", () => {
-        console.log("Disconnected from session");
-      });
-
       socket.on("reconnect", () => {
-        console.log("Reconnected to session");
-        // Re-join session room
         socket.emit("join-session", sessionId);
       });
 
@@ -114,7 +99,11 @@ export default function SessionPage() {
         setTasks((prev) =>
           prev.map((task) =>
             task.id === data.taskId
-              ? { ...task, status: "assigned" as const, assignedTo: data.agentId }
+              ? {
+                  ...task,
+                  status: "assigned" as const,
+                  assignedTo: data.agentId,
+                }
               : task
           )
         );
@@ -123,32 +112,39 @@ export default function SessionPage() {
       socket.on("task:completed", (data: { taskId: string }) => {
         setTasks((prev) =>
           prev.map((task) =>
-            task.id === data.taskId ? { ...task, status: "completed" as const } : task
+            task.id === data.taskId
+              ? { ...task, status: "completed" as const }
+              : task
           )
         );
       });
 
       // Agent events
-      socket.on("agent:initialized", (data: { agentId: string; sessionId: string }) => {
-        const newAgent: Agent = {
-          id: data.agentId,
-          sessionId: data.sessionId,
-          status: "initializing",
-        };
-        setAgents((prev) => {
-          const updated = [...prev, newAgent];
-          if (!activeTab && updated.length > 0) {
-            setActiveTab(updated[0].id);
-          }
-          return updated;
-        });
-      });
+      socket.on(
+        "agent:initialized",
+        (data: { agentId: string; sessionId: string }) => {
+          const newAgent: Agent = {
+            id: data.agentId,
+            sessionId: data.sessionId,
+            status: "initializing",
+          };
+          setAgents((prev) => {
+            const updated = [...prev, newAgent];
+            setActiveTab((current) => current || updated[0].id);
+            return updated;
+          });
+        }
+      );
 
       socket.on("agent:stream-ready", (data: AgentStreamReadyEvent) => {
         setAgents((prev) =>
           prev.map((agent) =>
             agent.id === data.agentId
-              ? { ...agent, streamUrl: data.streamUrl, status: "active" as const }
+              ? {
+                  ...agent,
+                  streamUrl: data.streamUrl,
+                  status: "active" as const,
+                }
               : agent
           )
         );
@@ -169,7 +165,6 @@ export default function SessionPage() {
 
       socket.on("agent:reasoning", (data: AgentReasoningEvent) => {
         if (data.actionId) {
-          // Update existing entry with reasoning
           setThinkingEntries((prev) => ({
             ...prev,
             [data.agentId]: (prev[data.agentId] || []).map((entry) =>
@@ -179,7 +174,6 @@ export default function SessionPage() {
             ),
           }));
         } else {
-          // Create new entry or append to last entry
           setThinkingEntries((prev) => {
             const entries = prev[data.agentId] || [];
             const lastEntry = entries[entries.length - 1];
@@ -230,21 +224,27 @@ export default function SessionPage() {
 
     fetchSessionStatus();
 
-    // Cleanup on unmount
     return () => {
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;
       }
     };
-  }, [sessionId, activeTab]);
+  }, [sessionId]);
+
+  const completedCount = tasks.filter((t) => t.status === "completed").length;
+  const progressPercent =
+    tasks.length > 0 ? (completedCount / tasks.length) * 100 : 0;
+  const activeAgentCount = agents.filter((a) => a.status === "active").length;
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-black">
-        <div className="text-center space-y-2">
-          <Loader2 className="mx-auto size-8 animate-spin text-zinc-400" />
-          <p className="text-sm text-zinc-400">Connecting to session...</p>
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-center space-y-3">
+          <Loader2 className="mx-auto size-6 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">
+            Connecting to session...
+          </p>
         </div>
       </div>
     );
@@ -252,14 +252,14 @@ export default function SessionPage() {
 
   if (error) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-black">
+      <div className="flex min-h-screen items-center justify-center">
         <div className="text-center space-y-4">
           <p className="text-sm text-destructive">{error}</p>
           <button
             onClick={() => router.push("/")}
-            className="text-sm text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
-            Return to home
+            Return home
           </button>
         </div>
       </div>
@@ -278,78 +278,109 @@ export default function SessionPage() {
 
   if (agents.length === 0) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-black">
-        <div className="text-center space-y-2">
-          <Loader2 className="mx-auto size-8 animate-spin text-zinc-400" />
-          <p className="text-sm text-zinc-400">Waiting for agents to initialize...</p>
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-center space-y-3">
+          <Loader2 className="mx-auto size-6 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">
+            Initializing agents...
+          </p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen flex-col bg-zinc-50 dark:bg-black">
-      <div className="border-b bg-white px-4 py-3 dark:bg-zinc-900">
+    <div className="flex h-screen flex-col">
+      {/* Accent gradient line */}
+      <div className="h-0.5 shrink-0 bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-500" />
+
+      {/* Header */}
+      <div className="shrink-0 border-b border-border px-5 py-3">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-              Session {sessionId.slice(0, 8)}
+          <div className="flex items-center gap-4">
+            <h1 className="text-sm font-semibold">
+              Session{" "}
+              <span className="font-mono text-muted-foreground">
+                {sessionId.slice(0, 8)}
+              </span>
             </h1>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">
-              {tasks.filter((t) => t.status === "completed").length} / {tasks.length}{" "}
-              tasks completed
-            </p>
+
+            <div className="hidden sm:flex items-center gap-3">
+              <div className="h-4 w-px bg-border" />
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {completedCount}/{tasks.length} tasks
+              </span>
+              <div className="h-1.5 w-24 rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-500"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            </div>
           </div>
-          <Badge variant="secondary">
-            {agents.filter((a) => a.status === "active").length} active
+
+          <Badge variant="outline" className="gap-2">
+            <span className="size-2 rounded-full bg-emerald-400 animate-pulse" />
+            {activeAgentCount} active
           </Badge>
         </div>
       </div>
 
-      <Tabs
-        value={activeTab}
-        onValueChange={setActiveTab}
-        className="flex flex-1 flex-col overflow-hidden"
-      >
-        <TabsList className="mx-4 mt-4 w-fit">
+      {/* Tab bar */}
+      <div className="shrink-0 border-b border-border px-5 py-2">
+        <div className="flex gap-1">
           {agents.map((agent) => (
-            <TabsTrigger key={agent.id} value={agent.id}>
-              Agent {agent.id.slice(0, 8)}
-              {agent.status === "active" && (
-                <span className="ml-1 size-1.5 rounded-full bg-green-500" />
-              )}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-
-        <div className="flex flex-1 overflow-hidden">
-          {agents.map((agent) => (
-            <TabsContent
+            <button
               key={agent.id}
-              value={agent.id}
-              className="m-0 flex flex-1 gap-0 overflow-hidden data-[state=active]:flex"
+              onClick={() => setActiveTab(agent.id)}
+              className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+                activeTab === agent.id
+                  ? "bg-muted text-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+              }`}
             >
-              <div className="flex flex-1 overflow-hidden">
-                <div className="flex flex-1">
-                  <VMTab
-                    agentId={agent.id}
-                    sessionId={sessionId}
-                    streamUrl={agent.streamUrl}
-                    isActive={activeTab === agent.id}
-                  />
-                </div>
-                <div className="w-80 shrink-0">
-                  <ThinkingPanel
-                    agentId={agent.id}
-                    sessionId={sessionId}
-                    entries={thinkingEntries[agent.id] || []}
-                  />
-                </div>
-              </div>
-            </TabsContent>
+              <span
+                className={`size-1.5 rounded-full ${
+                  agent.status === "active"
+                    ? "bg-emerald-400"
+                    : agent.status === "terminated"
+                      ? "bg-zinc-600"
+                      : "bg-amber-400 animate-pulse"
+                }`}
+              />
+              Agent {agent.id.slice(0, 6)}
+            </button>
           ))}
         </div>
-      </Tabs>
+      </div>
+
+      {/* Main content */}
+      <div className="flex flex-1 overflow-hidden">
+        {agents.map((agent) => (
+          <div
+            key={agent.id}
+            className={`flex-1 overflow-hidden ${
+              activeTab === agent.id ? "flex" : "hidden"
+            }`}
+          >
+            <div className="flex-1 overflow-hidden">
+              <VMTab
+                agentId={agent.id}
+                sessionId={sessionId}
+                streamUrl={agent.streamUrl}
+                isActive={activeTab === agent.id}
+              />
+            </div>
+            <div className="w-80 shrink-0 overflow-hidden">
+              <ThinkingPanel
+                agentId={agent.id}
+                sessionId={sessionId}
+                entries={thinkingEntries[agent.id] || []}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

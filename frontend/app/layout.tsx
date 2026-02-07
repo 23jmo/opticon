@@ -13,8 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Multi-Agent VM Orchestration",
-  description: "Submit prompts and watch multiple AI agents work in parallel",
+  title: "Panopticon",
+  description:
+    "Submit prompts and watch multiple AI agents work on cloud desktops in parallel",
 };
 
 export default function RootLayout({
@@ -23,7 +24,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className="dark">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >

@@ -2,9 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ThinkingEntry } from "@/lib/types";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ThinkingPanelProps {
@@ -13,17 +11,12 @@ interface ThinkingPanelProps {
   entries: ThinkingEntry[];
 }
 
-export function ThinkingPanel({
-  agentId,
-  sessionId,
-  entries,
-}: ThinkingPanelProps) {
+export function ThinkingPanel({ entries }: ThinkingPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [expandedEntries, setExpandedEntries] = useState<Set<string>>(
     new Set()
   );
 
-  // Auto-scroll to bottom when new entries arrive
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -42,9 +35,8 @@ export function ThinkingPanel({
     });
   };
 
-  const formatTimestamp = (timestamp: string) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], {
+  const formatTime = (timestamp: string) => {
+    return new Date(timestamp).toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
@@ -52,82 +44,96 @@ export function ThinkingPanel({
   };
 
   return (
-    <div className="flex h-full flex-col border-l bg-zinc-50 dark:bg-zinc-950">
-      <div className="border-b bg-white px-4 py-3 dark:bg-zinc-900">
-        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-          Agent Thinking
-        </h3>
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          {entries.length} action{entries.length !== 1 ? "s" : ""}
-        </p>
+    <div className="flex h-full flex-col border-l border-border bg-card/30">
+      {/* Header */}
+      <div className="shrink-0 border-b border-border px-4 py-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Thinking
+          </h3>
+          <span className="text-[10px] tabular-nums text-muted-foreground/60">
+            {entries.length} step{entries.length !== 1 ? "s" : ""}
+          </span>
+        </div>
       </div>
 
-      <ScrollArea className="flex-1">
-        <div ref={scrollRef} className="p-4 space-y-3">
-          {entries.length === 0 ? (
-            <div className="flex items-center justify-center py-8 text-sm text-zinc-500 dark:text-zinc-400">
-              Waiting for agent actions...
-            </div>
-          ) : (
-            entries.map((entry, index) => {
-              const isExpanded = expandedEntries.has(entry.id);
-              const hasReasoning = !!entry.reasoning;
+      {/* Timeline */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        {entries.length === 0 ? (
+          <div className="flex items-center justify-center h-32">
+            <p className="text-xs text-muted-foreground/60">
+              Waiting for actions...
+            </p>
+          </div>
+        ) : (
+          <div className="p-4">
+            <div className="relative">
+              {/* Vertical timeline line */}
+              <div className="absolute left-[7px] top-2 bottom-2 w-px bg-border" />
 
-              return (
-                <div key={entry.id}>
-                  <div className="space-y-2">
-                    <div className="flex items-start gap-3">
-                      <div className="mt-1 flex size-6 shrink-0 items-center justify-center rounded-full bg-zinc-200 dark:bg-zinc-800 text-xs font-medium text-zinc-600 dark:text-zinc-400">
-                        {index + 1}
-                      </div>
-                      <div className="flex-1 space-y-1">
+              <div className="space-y-4">
+                {entries.map((entry, index) => {
+                  const isExpanded = expandedEntries.has(entry.id);
+                  const isLast = index === entries.length - 1;
+
+                  return (
+                    <div
+                      key={entry.id}
+                      className="relative pl-6 animate-slide-in"
+                    >
+                      {/* Timeline dot */}
+                      <div
+                        className={cn(
+                          "absolute left-0 top-1 size-[15px] rounded-full border-2 border-background",
+                          isLast
+                            ? "bg-primary shadow-[0_0_8px_oklch(0.715_0.143_211_/_0.4)]"
+                            : "bg-muted-foreground/40"
+                        )}
+                      />
+
+                      <div className="space-y-1.5">
                         <div className="flex items-start justify-between gap-2">
-                          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
+                          <p className="text-[13px] font-medium text-foreground leading-snug">
                             {entry.action}
                           </p>
-                          <span className="shrink-0 text-xs text-zinc-500 dark:text-zinc-400">
-                            {formatTimestamp(entry.timestamp)}
+                          <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/60 pt-0.5">
+                            {formatTime(entry.timestamp)}
                           </span>
                         </div>
 
-                        {hasReasoning && (
-                          <button
-                            onClick={() => toggleExpand(entry.id)}
-                            className="flex items-center gap-1 text-xs text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-                          >
-                            {isExpanded ? (
-                              <>
-                                <ChevronUp className="size-3" />
-                                Hide reasoning
-                              </>
-                            ) : (
-                              <>
-                                <ChevronDown className="size-3" />
-                                Show reasoning
-                              </>
+                        {entry.reasoning && (
+                          <>
+                            <button
+                              onClick={() => toggleExpand(entry.id)}
+                              className="group flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              <ChevronRight
+                                className={cn(
+                                  "size-3 transition-transform",
+                                  isExpanded && "rotate-90"
+                                )}
+                              />
+                              reasoning
+                            </button>
+
+                            {isExpanded && (
+                              <div className="rounded-md border border-border bg-muted p-3 animate-slide-in">
+                                <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap font-mono">
+                                  {entry.reasoning}
+                                </p>
+                              </div>
                             )}
-                          </button>
+                          </>
                         )}
                       </div>
                     </div>
-
-                    {isExpanded && hasReasoning && (
-                      <div className="ml-9 rounded-md bg-zinc-100 dark:bg-zinc-800 p-3">
-                        <p className="text-xs leading-relaxed text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap">
-                          {entry.reasoning}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                  {index < entries.length - 1 && (
-                    <Separator className="my-3" />
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
-      </ScrollArea>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
