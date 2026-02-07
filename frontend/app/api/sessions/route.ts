@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
-import Anthropic from "@anthropic-ai/sdk";
+import Dedalus from "dedalus-labs";
+import { DedalusRunner } from "dedalus-labs";
 import {
   createSession,
   addTodos,
@@ -9,9 +10,8 @@ import {
 import { getIO } from "@/lib/socket";
 import { spawnWorkers } from "@/lib/worker-manager";
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+const client = new Dedalus();
+const runner = new DedalusRunner(client);
 
 export async function POST(request: Request) {
   const body = await request.json();
@@ -39,13 +39,13 @@ export async function POST(request: Request) {
   const sessionId = uuidv4();
   createSession(sessionId, prompt.trim(), agentCount);
 
-  // Decompose prompt into TODOs via Claude
+  // Decompose prompt into TODOs via Dedalus
   let todoDescriptions: string[];
   try {
-    const message = await anthropic.messages.create({
-      model: "claude-sonnet-4-5-20250929",
-      max_tokens: 1024,
-      system: `You are a task decomposition engine. Given a user's prompt, break it down into independent, parallelizable tasks that can each be executed by an AI agent controlling a cloud desktop (browser, file system, etc).
+    const response = await runner.run({
+      input: prompt.trim(),
+      model: "anthropic/claude-sonnet-4-5-20250929",
+      instructions: `You are a task decomposition engine. Given a user's prompt, break it down into independent, parallelizable tasks that can each be executed by an AI agent controlling a cloud desktop (browser, file system, etc).
 
 Rules:
 - Each task must be independently executable
@@ -53,15 +53,10 @@ Rules:
 - Return ONLY valid JSON: { "todos": [{ "description": "..." }] }
 - Target exactly ${agentCount} tasks (one per available agent)
 - Be specific and actionable in each task description`,
-      messages: [{ role: "user", content: prompt.trim() }],
+      max_tokens: 1024,
     });
 
-    const textBlock = message.content.find((block) => block.type === "text");
-    if (!textBlock || textBlock.type !== "text") {
-      throw new Error("No text response from Claude");
-    }
-
-    const parsed = JSON.parse(textBlock.text);
+    const parsed = JSON.parse(response.finalOutput);
     todoDescriptions = parsed.todos.map(
       (t: { description: string }) => t.description
     );

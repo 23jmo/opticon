@@ -4,7 +4,7 @@ Next.js application that serves both the web UI and the backend orchestration la
 
 ## What it does
 
-- **Orchestrator** — receives a user prompt, calls Claude to decompose it into independent tasks, stores them in an in-memory session store.
+- **Orchestrator** — receives a user prompt, calls Dedalus Labs SDK (routing to Claude) to decompose it into independent tasks, stores them in an in-memory session store.
 - **Worker spawner** — spawns one Python agent process per task. Each worker controls an E2B cloud desktop sandbox.
 - **Real-time relay** — Socket.io pushes task lifecycle events and agent reasoning to connected browsers.
 
@@ -12,7 +12,7 @@ Next.js application that serves both the web UI and the backend orchestration la
 
 - Node.js 20+
 - Python 3.10+ (for agent workers)
-- API keys: `ANTHROPIC_API_KEY`, `E2B_API_KEY`, `DEDALUS_API_KEY`
+- API keys: `DEDALUS_API_KEY`, `E2B_API_KEY`
 
 ## Setup
 
@@ -23,9 +23,8 @@ npm install
 Create `.env.local` in this directory:
 
 ```
-ANTHROPIC_API_KEY=sk-ant-...
-E2B_API_KEY=...
 DEDALUS_API_KEY=...
+E2B_API_KEY=...
 ```
 
 ## Running
