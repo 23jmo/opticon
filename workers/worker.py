@@ -1,136 +1,228 @@
-"""Agent worker process.
-
-Spawned by the Node.js backend (worker-manager.ts). Communicates over
-stdin/stdout using newline-delimited JSON messages.
-
-Protocol
---------
-stdout → backend:
-    {"type": "sandbox_ready", "sandboxId": "...", "streamUrl": "..."}
-    {"type": "log", "action": "...", "reasoning": "..."}
-    {"type": "complete", "todoId": "...", "result": "..."}
-
-stdin ← backend:
-    {"taskId": "...", "description": "..."}
-"""
-
 import asyncio
 import json
+import logging
 import os
 import sys
 
-from dedalus_labs import AsyncDedalus, DedalusRunner
+import socketio
 from e2b_desktop import Sandbox
+from dedalus_labs import AsyncDedalus
 
-from tools.e2b_tools import create_tools
+sys.path.insert(0, os.path.dirname(__file__))
+import e2b_tools
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+logger = logging.getLogger(__name__)
 
-def emit(message: dict) -> None:
-    """Write a JSON line to stdout for the Node.js backend."""
-    sys.stdout.write(json.dumps(message) + "\n")
-    sys.stdout.flush()
+SYSTEM_PROMPT = (
+    "You are an AI agent controlling a Linux desktop. "
+    "You will be shown a screenshot of the current screen before each turn. "
+    "Look at the screenshot carefully, then use one of the available tools "
+    "(click, double_click, type_text, press_key, move_mouse) to interact with the desktop. "
+    "You can only use ONE tool per turn. After your action, you'll receive a new screenshot. "
+    "When the task is complete, call the 'done' tool with a summary."
+)
 
-
-def emit_log(action: str, reasoning: str) -> None:
-    """Convenience wrapper used by tool functions."""
-    emit({"type": "log", "action": action, "reasoning": reasoning})
-
-
-def read_stdin_line() -> str | None:
-    """Read one line from stdin (blocking). Returns None on EOF."""
-    try:
-        line = sys.stdin.readline()
-        if not line:
-            return None
-        return line.strip()
-    except EOFError:
-        return None
+MODEL = "anthropic/claude-sonnet-4-5-20250929"
+MAX_STEPS = 50
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+def make_screenshot_message():
+    """Capture the desktop and return a user message with the image."""
+    b64 = e2b_tools.screenshot_as_base64()
+    return {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Here is the current screenshot of the desktop:"},
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/png;base64,{b64}",
+                    "detail": "high",
+                },
+            },
+            {"type": "text", "text": "What action should you take next?"},
+        ],
+    }
 
-async def main() -> None:
-    session_id = os.environ.get("SESSION_ID", "")
-    agent_id = os.environ.get("AGENT_ID", "")
-    task_id = os.environ.get("TASK_ID", "")
-    task_description = os.environ.get("TASK_DESCRIPTION", "")
-    e2b_api_key = os.environ.get("E2B_API_KEY", "")
-    dedalus_api_key = os.environ.get("DEDALUS_API_KEY", "")
 
-    if not e2b_api_key or not dedalus_api_key:
-        print("ERROR: E2B_API_KEY and DEDALUS_API_KEY are required", file=sys.stderr)
-        sys.exit(1)
+async def run_agent_loop(client, task_description, on_step=None):
+    """
+    Observe-think-act loop using Dedalus chat.completions.create().
 
-    # 1. Create E2B Desktop Sandbox
-    emit_log("booting", "Creating E2B Desktop sandbox...")
-    sandbox = Sandbox.create(api_key=e2b_api_key)
+    Each turn:
+      1. Take a screenshot → inject as a user message (image_url)
+      2. Model sees the desktop and returns a tool call
+      3. Execute the tool, loop back to 1
 
-    sandbox_id = sandbox.sandbox_id
-    stream_url = sandbox.stream.get_url() if hasattr(sandbox, "stream") else ""
+    Returns the final summary when the model calls 'done'.
+    """
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": f"Your task: {task_description}"},
+    ]
 
-    emit({
-        "type": "sandbox_ready",
-        "sandboxId": sandbox_id,
-        "streamUrl": stream_url,
-    })
+    for step in range(MAX_STEPS):
+        # Observe: take screenshot and show it to the model
+        messages.append(make_screenshot_message())
 
-    # 2. Create tool functions bound to this sandbox
-    tools = create_tools(sandbox, emit_log)
+        response = await client.chat.completions.create(
+            model=MODEL,
+            messages=messages,
+            tools=e2b_tools.TOOL_SCHEMAS,
+            tool_choice={"type": "any"},
+        )
 
-    # 3. Create Dedalus client + runner
-    client = AsyncDedalus(api_key=dedalus_api_key)
-    runner = DedalusRunner(client)
+        choice = response.choices[0]
+        msg = choice.message
 
-    # 4. Run the initial task
-    current_task_id = task_id
-    current_description = task_description
-
-    while True:
-        emit_log("running", f"Starting task: {current_description[:120]}")
-
-        try:
-            result = await runner.run(
-                input=current_description,
-                model="anthropic/claude-sonnet-4-5-20250929",
-                tools=tools,
-                max_steps=30,
-            )
-            final_output = result.final_output if hasattr(result, "final_output") else str(result)
-        except Exception as exc:
-            final_output = f"Error: {exc}"
-            print(f"[worker:{agent_id}] Task failed: {exc}", file=sys.stderr)
-
-        # 5. Report completion
-        emit({
-            "type": "complete",
-            "todoId": current_task_id,
-            "result": final_output,
+        # Append assistant response to history
+        messages.append(msg.to_dict() if hasattr(msg, "to_dict") else {
+            "role": "assistant",
+            "content": msg.content,
+            "tool_calls": [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                }
+                for tc in (msg.tool_calls or [])
+            ],
         })
 
-        # 6. Wait for next task from stdin
-        raw = read_stdin_line()
-        if raw is None:
-            break
+        if not msg.tool_calls:
+            return msg.content or "(no response)"
 
+        # Execute the first tool call (one action per turn)
+        tc = msg.tool_calls[0]
+        name = tc.function.name
         try:
-            next_task = json.loads(raw)
-            current_task_id = next_task["taskId"]
-            current_description = next_task["description"]
-        except (json.JSONDecodeError, KeyError) as exc:
-            print(f"[worker:{agent_id}] Bad task payload: {exc}", file=sys.stderr)
-            break
+            args = json.loads(tc.function.arguments)
+        except json.JSONDecodeError:
+            args = {}
 
-    # 7. Clean up
-    emit_log("cleanup", "Shutting down sandbox...")
+        if on_step:
+            await on_step(step + 1, name, args)
+
+        result = e2b_tools.execute_tool(name, args)
+
+        # If done, return the summary
+        if name == "done":
+            messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+            return result
+
+        # Append tool result and continue
+        messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+
+    return "(max steps reached)"
+
+
+async def main():
+    session_id = os.environ["SESSION_ID"]
+    agent_id = os.environ["AGENT_ID"]
+    socket_url = os.environ.get("SOCKET_URL", "http://localhost:3000")
+    todo_file = os.environ["TODO_FILE"]
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format=f"[%(levelname)s] agent-{agent_id}: %(message)s",
+    )
+
+    # --- Socket.io connection ---
+    sio = socketio.AsyncClient()
+    await sio.connect(socket_url)
+    await sio.emit("agent:join", {"sessionId": session_id, "agentId": agent_id})
+
+    async def emit(event, data):
+        await sio.emit(event, {"sessionId": session_id, "agentId": agent_id, **data})
+
+    # --- Boot E2B sandbox ---
+    desktop = None
     try:
-        sandbox.kill()
-    except Exception:
-        pass
+        desktop = Sandbox.create()
+        desktop.stream.start()
+        stream_url = desktop.stream.get_url()
+        await emit("agent:stream_ready", {"streamUrl": stream_url})
+        logger.info("Sandbox booted, stream at %s", stream_url)
+    except Exception as e:
+        logger.error("Failed to boot sandbox: %s", e)
+        await emit("agent:error", {"error": str(e)})
+        await sio.disconnect()
+        return
+
+    # --- Init tools ---
+    e2b_tools.init(desktop)
+
+    # --- Init Daedalus client ---
+    client = AsyncDedalus()
+
+    # --- Task loop ---
+    try:
+        while True:
+            tasks = read_todo_file(todo_file)
+            if tasks is None:
+                await asyncio.sleep(2)
+                continue
+
+            my_tasks = [
+                t
+                for t in tasks
+                if t.get("assignedTo") == agent_id and t["status"] == "assigned"
+            ]
+
+            if not my_tasks:
+                all_done = all(t["status"] == "completed" for t in tasks)
+                no_pending = not any(t["status"] == "pending" for t in tasks)
+                if all_done or no_pending:
+                    break
+                await asyncio.sleep(2)
+                continue
+
+            for task in my_tasks:
+                await emit(
+                    "agent:thinking",
+                    {"action": "Starting task", "detail": task["description"]},
+                )
+                logger.info("Starting task %s: %s", task["id"], task["description"])
+
+                async def on_step(step, name, args):
+                    logger.info("  Step %d: %s(%s)", step, name, args)
+                    await emit("agent:thinking", {
+                        "action": f"Tool: {name}",
+                        "detail": json.dumps(args),
+                    })
+
+                try:
+                    result = await run_agent_loop(
+                        client, task["description"], on_step=on_step
+                    )
+                except Exception as e:
+                    result = f"Error: {e}"
+                    await emit(
+                        "agent:thinking",
+                        {"action": "Task failed", "detail": str(e)},
+                    )
+                    logger.error("Task %s failed: %s", task["id"], e)
+
+                await emit(
+                    "task:completed", {"taskId": task["id"], "result": result}
+                )
+                logger.info("Completed task %s", task["id"])
+
+    finally:
+        if desktop:
+            desktop.kill()
+        await emit("agent:terminated", {})
+        await sio.disconnect()
+        logger.info("Worker shut down")
+
+
+def read_todo_file(path):
+    """Read tasks from the shared TODO file. Returns None if unavailable."""
+    try:
+        with open(path, "r") as f:
+            return json.load(f)["tasks"]
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        return None
 
 
 if __name__ == "__main__":
