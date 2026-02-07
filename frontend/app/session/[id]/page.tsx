@@ -39,7 +39,9 @@ function SessionContent() {
   const sessionId = params.id as string;
   const isMock = sessionId === "demo";
 
-  const prompt = searchParams.get("prompt") || MOCK_PROMPT;
+  const [prompt, setPrompt] = useState(
+    searchParams.get("prompt") || (isMock ? MOCK_PROMPT : "")
+  );
   const agentCountParam = parseInt(searchParams.get("agents") || "4", 10);
 
   const socketRef = useRef<Socket | null>(null);
@@ -163,6 +165,9 @@ function SessionContent() {
           if (data.status === "pending_approval") {
             router.push(`/session/${sessionId}/approve`);
             return;
+          }
+          if (data.prompt) {
+            setPrompt(data.prompt);
           }
           if (data.agents) {
             setAgents(data.agents);
