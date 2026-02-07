@@ -53,3 +53,16 @@ export interface ClientToServerEvents {
   "session:join": (sessionId: string) => void;
   "session:leave": (sessionId: string) => void;
 }
+
+// Alias for frontend components that use "Task" instead of "Todo"
+export type Task = Todo;
+
+// Frontend-specific types (used by UI components)
+export interface ThinkingEntry {
+  id: string;
+  agentId: string;
+  timestamp: string;
+  action: string;
+  reasoning?: string;
+  expanded?: boolean;
+}
