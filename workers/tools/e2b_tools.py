@@ -47,7 +47,8 @@ def create_tools(sandbox: Sandbox, emit_log):
     def scroll(x: int, y: int, direction: str, amount: int) -> str:
         """Scroll at the given (x, y) coordinates. direction is 'up' or 'down'. amount is number of scroll units."""
         emit_log("scroll", f"Scrolling {direction} by {amount} at ({x}, {y})")
-        sandbox.scroll(x, y, direction=direction, amount=amount)
+        sandbox.move_mouse(x, y)
+        sandbox.scroll(direction=direction, amount=amount)
         return f"Scrolled {direction} by {amount} at ({x}, {y})"
 
     return [screenshot, click, double_click, type_text, press_key, scroll]

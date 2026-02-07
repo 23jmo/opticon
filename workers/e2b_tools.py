@@ -49,7 +49,8 @@ def move_mouse(x: int, y: int) -> str:
 
 def scroll(x: int, y: int, direction: str = "down", amount: int = 3) -> str:
     """Scroll at screen coordinates (x, y) in the given direction."""
-    _sandbox.scroll(x, y, direction=direction, amount=amount)
+    _sandbox.move_mouse(x, y)
+    _sandbox.scroll(direction=direction, amount=amount)
     return f"Scrolled {direction} by {amount} at ({x}, {y})"
 
 
@@ -153,7 +154,7 @@ TOOL_SCHEMAS = [
                     "y": {"type": "integer", "description": "Y coordinate"},
                     "direction": {
                         "type": "string",
-                        "enum": ["up", "down", "left", "right"],
+                        "enum": ["up", "down"],
                         "description": "Direction to scroll",
                     },
                     "amount": {
