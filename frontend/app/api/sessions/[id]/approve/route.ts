@@ -9,6 +9,10 @@ import { getIO } from "@/lib/socket";
 import { spawnWorkers } from "@/lib/worker-manager";
 import type { Todo } from "@/lib/types";
 import { auth } from "@/auth";
+import {
+  replaceTodos,
+  persistSessionStatus,
+} from "@/lib/db/session-persist";
 
 export async function POST(
   request: Request,
@@ -68,8 +72,14 @@ export async function POST(
   updateTodos(sessionId, updatedTodos);
   session.agentCount = agentCount;
 
+  // Persist updated todos to database
+  replaceTodos(sessionId, updatedTodos).catch(console.error);
+
   // Approve: sets status to "running"
   approveSession(sessionId);
+
+  // Persist status update
+  persistSessionStatus(sessionId, "running").catch(console.error);
 
   // Emit task:created events
   try {

@@ -39,3 +39,26 @@ export const accounts = pgTable(
     primaryKey({ columns: [account.provider, account.providerAccountId] }),
   ]
 );
+
+export const sessions = pgTable("sessions", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  prompt: text("prompt").notNull(),
+  agentCount: integer("agent_count").notNull(),
+  status: text("status").notNull(),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  completedAt: timestamp("completed_at", { mode: "date" }),
+});
+
+export const todos = pgTable("todos", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id")
+    .notNull()
+    .references(() => sessions.id, { onDelete: "cascade" }),
+  description: text("description").notNull(),
+  status: text("status").notNull(),
+  assignedTo: text("assigned_to"),
+  result: text("result"),
+});

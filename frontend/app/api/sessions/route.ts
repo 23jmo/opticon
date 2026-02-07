@@ -4,6 +4,11 @@ import Dedalus from "dedalus-labs";
 import { DedalusRunner } from "dedalus-labs";
 import { createSession, addTodos, getSession } from "@/lib/session-store";
 import { auth } from "@/auth";
+import {
+  persistSession,
+  persistTodos,
+  persistSessionStatus,
+} from "@/lib/db/session-persist";
 
 let runner: DedalusRunner | null = null;
 
@@ -46,6 +51,15 @@ export async function POST(request: Request) {
   const sessionId = uuidv4();
   createSession(sessionId, prompt.trim(), agentCount, authSession.user.id);
 
+  // Persist session to database
+  persistSession(
+    sessionId,
+    authSession.user.id,
+    prompt.trim(),
+    agentCount,
+    "decomposing"
+  ).catch(console.error);
+
   // Decompose prompt into TODOs via Dedalus
   let todoDescriptions: string[];
   try {
@@ -84,9 +98,16 @@ Rules:
   // Add TODOs to session — do NOT start workers yet
   const todos = addTodos(sessionId, todoDescriptions);
 
+  // Persist todos to database
+  persistTodos(sessionId, todos).catch(console.error);
+
   // Set session to pending_approval so the user can review tasks
   const panopticonSession = getSession(sessionId);
-  if (panopticonSession) panopticonSession.status = "pending_approval";
+  if (panopticonSession) {
+    panopticonSession.status = "pending_approval";
+    // Persist status update
+    persistSessionStatus(sessionId, "pending_approval").catch(console.error);
+  }
 
   return NextResponse.json({ sessionId, tasks: todos }, { status: 201 });
 }
