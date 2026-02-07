@@ -1,20 +1,21 @@
 import { NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
-import Dedalus from "dedalus-labs";
-import { DedalusRunner } from "dedalus-labs";
 import { createSession, addTodos, getSession } from "@/lib/session-store";
-
-let runner: DedalusRunner | null = null;
-
-function getRunner(): DedalusRunner {
-  if (!runner) {
-    const client = new Dedalus({ apiKey: process.env.DEDALUS_API_KEY });
-    runner = new DedalusRunner(client);
-  }
-  return runner;
-}
+import { auth } from "@/auth";
+import { getMaxAgentsForUser } from "@/lib/billing";
+import {
+  persistSession,
+  persistTodos,
+  persistSessionStatus,
+} from "@/lib/db/session-persist";
+import { decomposeTasks } from "@/lib/orchestrator";
 
 export async function POST(request: Request) {
+  const authSession = await auth();
+  if (!authSession?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const body = await request.json();
   const { prompt, agentCount } = body as {
     prompt: string;
@@ -37,38 +38,38 @@ export async function POST(request: Request) {
     );
   }
 
+  const maxAgents = await getMaxAgentsForUser(authSession.user.id);
+  if (agentCount > maxAgents) {
+    return NextResponse.json(
+      {
+        error: `Your plan allows up to ${maxAgents} agents.`,
+        code: "PLAN_LIMIT_EXCEEDED",
+        maxAgents,
+      },
+      { status: 403 },
+    );
+  }
+
   const sessionId = uuidv4();
-  createSession(sessionId, prompt.trim(), agentCount);
+  createSession(sessionId, prompt.trim(), agentCount, authSession.user.id);
+
+  // Persist session to database
+  persistSession(
+    sessionId,
+    authSession.user.id,
+    prompt.trim(),
+    agentCount,
+    "decomposing"
+  ).catch(console.error);
 
   // Decompose prompt into TODOs via Dedalus
   let todoDescriptions: string[];
   try {
-    const response = await getRunner().run({
-      input: prompt.trim(),
-      model: "anthropic/claude-sonnet-4-5-20250929",
-      instructions: `You are a task decomposition engine. Given a user's prompt, break it down into independent, parallelizable tasks that can each be executed by an AI agent controlling a cloud desktop (browser, file system, etc).
-
-Rules:
-- Each task must be independently executable
-- Tasks should be roughly equal in complexity
-- Return ONLY valid JSON: { "todos": [{ "description": "..." }] }
-- Target exactly ${agentCount} tasks (one per available agent)
-- Be specific and actionable in each task description`,
-      max_tokens: 1024,
-    });
-
-    const raw = (response as { finalOutput: string }).finalOutput
-      .replace(/^```(?:json)?\s*/i, "")
-      .replace(/```\s*$/, "")
-      .trim();
-    const parsed = JSON.parse(raw);
-    todoDescriptions = parsed.todos.map(
-      (t: { description: string }) => t.description,
-    );
+    todoDescriptions = await decomposeTasks(prompt.trim(), agentCount);
   } catch (error) {
     console.error("[orchestrator] Failed to decompose prompt:", error);
-    const session = getSession(sessionId);
-    if (session) session.status = "failed";
+    const failedSession = getSession(sessionId);
+    if (failedSession) failedSession.status = "failed";
     return NextResponse.json(
       { error: "Failed to decompose prompt" },
       { status: 500 },
@@ -78,9 +79,16 @@ Rules:
   // Add TODOs to session — do NOT start workers yet
   const todos = addTodos(sessionId, todoDescriptions);
 
+  // Persist todos to database
+  persistTodos(sessionId, todos).catch(console.error);
+
   // Set session to pending_approval so the user can review tasks
-  const session = getSession(sessionId);
-  if (session) session.status = "pending_approval";
+  const panopticonSession = getSession(sessionId);
+  if (panopticonSession) {
+    panopticonSession.status = "pending_approval";
+    // Persist status update
+    persistSessionStatus(sessionId, "pending_approval").catch(console.error);
+  }
 
   return NextResponse.json({ sessionId, tasks: todos }, { status: 201 });
 }

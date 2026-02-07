@@ -10,6 +10,7 @@ import { CheckCircle2, ArrowLeft } from "lucide-react";
 
 interface SessionSummaryProps {
   sessionId: string;
+  prompt?: string;
   tasks: Task[];
   agents: Agent[];
   whiteboard?: string;
@@ -17,6 +18,7 @@ interface SessionSummaryProps {
 
 export function SessionSummary({
   sessionId,
+  prompt,
   tasks,
   agents,
   whiteboard,
@@ -41,11 +43,17 @@ export function SessionSummary({
           <div className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
             <CheckCircle2 className="size-8 text-emerald-400" />
           </div>
-          <div className="space-y-1">
+          <div className="space-y-2">
             <h1 className="text-2xl font-bold">Session Complete</h1>
-            <p className="text-sm text-muted-foreground">
-              All agents have finished their work
-            </p>
+            {prompt ? (
+              <p className="text-sm text-muted-foreground max-w-lg mx-auto leading-relaxed">
+                {prompt}
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                All agents have finished their work
+              </p>
+            )}
           </div>
         </div>
 
@@ -99,7 +107,9 @@ export function SessionSummary({
                         >
                           <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-400" />
                           <span className="text-sm text-muted-foreground leading-snug">
-                            {task.description}
+                            {typeof task.description === "string"
+                              ? task.description
+                              : JSON.stringify(task.description)}
                           </span>
                         </li>
                       ))}
@@ -116,7 +126,7 @@ export function SessionSummary({
         </div>
 
         {/* Whiteboard */}
-        {whiteboard && (
+        {whiteboard && typeof whiteboard === "string" && (
           <Card className="bg-card/50">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm">Whiteboard</CardTitle>

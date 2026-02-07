@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, Suspense } from "react";
+import { useEffect, useState, useRef, Suspense, useCallback } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { Socket } from "socket.io-client";
 import {
@@ -16,6 +16,7 @@ import {
   AgentErrorEvent,
   TaskCompletedEvent,
   WhiteboardUpdatedEvent,
+  SessionTasksDoneEvent,
 } from "@/lib/types";
 import { createSessionSocket } from "@/lib/socket-client";
 import {
@@ -26,6 +27,7 @@ import {
 } from "@/lib/mock-data";
 import { PromptBar } from "@/components/prompt-bar";
 import { AgentBrowser } from "@/components/agent-browser";
+import { AgentGrid } from "@/components/agent-grid";
 import { ThinkingSidebar } from "@/components/thinking-sidebar";
 import { Loader2 } from "lucide-react";
 
@@ -37,7 +39,9 @@ function SessionContent() {
   const sessionId = params.id as string;
   const isMock = sessionId === "demo";
 
-  const prompt = searchParams.get("prompt") || MOCK_PROMPT;
+  const [prompt, setPrompt] = useState(
+    searchParams.get("prompt") || (isMock ? MOCK_PROMPT : "")
+  );
   const agentCountParam = parseInt(searchParams.get("agents") || "4", 10);
 
   const socketRef = useRef<Socket | null>(null);
@@ -52,8 +56,78 @@ function SessionContent() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [whiteboard, setWhiteboard] = useState<string>("");
   const [sessionComplete, setSessionComplete] = useState(false);
+  const [tasksComplete, setTasksComplete] = useState(false);
+  const [idleSecondsLeft, setIdleSecondsLeft] = useState<number | null>(null);
+  const idleCountdownRef = useRef<NodeJS.Timeout | null>(null);
   const [isLoading, setIsLoading] = useState(!isMock);
   const [error, setError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"tabs" | "grid">("tabs");
+
+  const handleStop = useCallback(() => {
+    if (socketRef.current) {
+      socketRef.current.emit("session:stop", { sessionId });
+    }
+    // Update all agents to terminated
+    setAgents((prev) =>
+      prev.map((agent) => ({ ...agent, status: "terminated" as const }))
+    );
+  }, [sessionId]);
+
+  const handleAgentCommand = useCallback(
+    (agentId: string, message: string) => {
+      if (socketRef.current) {
+        socketRef.current.emit("agent:command", { agentId, message });
+      }
+    },
+    []
+  );
+
+  const handleGridSelectAgent = useCallback(
+    (agentId: string) => {
+      setActiveTab(agentId);
+      setViewMode("tabs");
+    },
+    []
+  );
+
+  const handleFollowUp = useCallback(
+    (followUpPrompt: string) => {
+      if (socketRef.current) {
+        socketRef.current.emit("session:followup", {
+          sessionId,
+          prompt: followUpPrompt,
+        });
+        // Reset tasks-complete state — agents are working again
+        setTasksComplete(false);
+        setIdleSecondsLeft(null);
+        if (idleCountdownRef.current) {
+          clearInterval(idleCountdownRef.current);
+          idleCountdownRef.current = null;
+        }
+      }
+    },
+    [sessionId]
+  );
+
+  const startIdleCountdown = useCallback(() => {
+    // Clear any existing countdown
+    if (idleCountdownRef.current) {
+      clearInterval(idleCountdownRef.current);
+    }
+    setIdleSecondsLeft(300); // 5 minutes
+    idleCountdownRef.current = setInterval(() => {
+      setIdleSecondsLeft((prev) => {
+        if (prev === null || prev <= 1) {
+          if (idleCountdownRef.current) {
+            clearInterval(idleCountdownRef.current);
+            idleCountdownRef.current = null;
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, []);
 
   // Mock mode: simulate streaming thinking entries
   useEffect(() => {
@@ -92,6 +166,9 @@ function SessionContent() {
             router.push(`/session/${sessionId}/approve`);
             return;
           }
+          if (data.prompt) {
+            setPrompt(data.prompt);
+          }
           if (data.agents) {
             setAgents(data.agents);
             if (data.agents.length > 0) {
@@ -105,8 +182,7 @@ function SessionContent() {
             setWhiteboard(data.whiteboard);
           }
           if (data.status === "completed") {
-            setSessionComplete(true);
-            setIsLoading(false);
+            router.replace(`/session/${sessionId}/summary`);
             return;
           }
         }
@@ -165,6 +241,7 @@ function SessionContent() {
       socket.on("agent:join", (data: AgentJoinEvent) => {
         const newAgent: Agent = {
           id: data.agentId,
+          name: data.agentId,
           sessionId: data.sessionId,
           status: "booting",
           currentTaskId: null,
@@ -273,8 +350,14 @@ function SessionContent() {
         setWhiteboard(data.content);
       });
 
+      socket.on("session:tasks_done", (_data: SessionTasksDoneEvent) => {
+        setTasksComplete(true);
+        startIdleCountdown();
+      });
+
       socket.on("session:complete", () => {
         setSessionComplete(true);
+        router.replace(`/session/${sessionId}/summary`);
       });
 
       setIsLoading(false);
@@ -287,8 +370,12 @@ function SessionContent() {
         socketRef.current.disconnect();
         socketRef.current = null;
       }
+      if (idleCountdownRef.current) {
+        clearInterval(idleCountdownRef.current);
+        idleCountdownRef.current = null;
+      }
     };
-  }, [sessionId, isMock, router]);
+  }, [sessionId, isMock, router, startIdleCountdown]);
 
   if (isLoading) {
     return (
@@ -334,15 +421,21 @@ function SessionContent() {
 
   return (
     <div className="flex h-screen flex-col">
-      {/* Accent gradient line */}
-      <div className="h-0.5 shrink-0 bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-500" />
-
-      {/* Completion banner */}
-      {sessionComplete && (
+      {/* Tasks-done banner (agents idle, waiting for follow-up) */}
+      {tasksComplete && (
         <div className="shrink-0 border-b border-emerald-500/20 bg-emerald-500/10 px-5 py-3 flex items-center justify-between">
-          <p className="text-sm text-emerald-400 font-medium">
-            All agents have completed their tasks
-          </p>
+          <div className="flex items-center gap-3">
+            <p className="text-sm text-emerald-400 font-medium">
+              All tasks completed
+            </p>
+            {idleSecondsLeft !== null && idleSecondsLeft > 0 && (
+              <span className="text-xs text-emerald-400/70">
+                Agents idle &mdash;{" "}
+                {Math.floor(idleSecondsLeft / 60)}:
+                {String(idleSecondsLeft % 60).padStart(2, "0")} remaining
+              </span>
+            )}
+          </div>
           <button
             onClick={() => router.push(`/session/${sessionId}/summary`)}
             className="text-sm text-emerald-400 hover:text-emerald-300 font-medium transition-colors"
@@ -353,20 +446,37 @@ function SessionContent() {
       )}
 
       {/* Prompt bar */}
-      <PromptBar prompt={prompt} agentCount={agents.length} />
+      <PromptBar
+        prompt={prompt}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        onStop={handleStop}
+        tasksComplete={tasksComplete}
+        onFollowUp={handleFollowUp}
+      />
 
-      {/* Main content: browser + thinking sidebar */}
+      {/* Main content: browser/grid + thinking sidebar */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Agent browser */}
+        {/* Agent view */}
         <div className="flex-1 p-3 min-w-0">
-          <AgentBrowser
-            agents={agents}
-            activeAgentId={activeTab}
-            onTabChange={setActiveTab}
-            agentActivities={MOCK_AGENT_ACTIVITIES}
-            sessionId={sessionId}
-            whiteboard={whiteboard}
-          />
+          {viewMode === "tabs" ? (
+            <AgentBrowser
+              agents={agents}
+              activeAgentId={activeTab}
+              onTabChange={setActiveTab}
+              agentActivities={MOCK_AGENT_ACTIVITIES}
+              sessionId={sessionId}
+              whiteboard={whiteboard}
+              onAgentCommand={handleAgentCommand}
+            />
+          ) : (
+            <AgentGrid
+              agents={agents}
+              agentActivities={MOCK_AGENT_ACTIVITIES}
+              onSelectAgent={handleGridSelectAgent}
+              onAgentCommand={handleAgentCommand}
+            />
+          )}
         </div>
 
         {/* Thinking sidebar */}

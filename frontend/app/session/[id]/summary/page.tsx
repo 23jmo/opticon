@@ -62,6 +62,7 @@ export default function SummaryPage() {
   return (
     <SessionSummary
       sessionId={sessionId}
+      prompt={session.prompt}
       tasks={session.todos}
       agents={session.agents}
       whiteboard={session.whiteboard}

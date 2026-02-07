@@ -1,9 +1,10 @@
 import { createServer } from "node:http";
 import next from "next";
 import { Server } from "socket.io";
-import { setIO, getIO } from "./lib/socket";
+import { setIO } from "./lib/socket";
 import {
   getSession,
+  addTodos,
   assignTask,
   completeTask,
   getNextPendingTask,
@@ -23,7 +24,14 @@ import type {
   TaskCompletedEvent,
   AgentTerminatedEvent,
   WhiteboardUpdatedEvent,
+  SessionFollowUpEvent,
 } from "./lib/types";
+import {
+  persistTodoStatus,
+  persistTodos,
+  persistSessionStatus,
+} from "./lib/db/session-persist";
+import { decomposeTasks } from "./lib/orchestrator";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "localhost";
@@ -31,6 +39,11 @@ const port = parseInt(process.env.PORT || "3000", 10);
 
 const app = next({ dev, hostname, port });
 const handler = app.getRequestHandler();
+
+/** 5-minute idle shutdown timers, keyed by sessionId */
+const idleTimers = new Map<string, NodeJS.Timeout>();
+
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 app.prepare().then(() => {
   const httpServer = createServer(handler);
@@ -46,6 +59,91 @@ app.prepare().then(() => {
 
   setIO(io);
 
+  /**
+   * Start (or restart) the 5-minute idle shutdown timer for a session.
+   * When the timer fires, the session truly completes.
+   */
+  function startIdleTimer(sessionId: string): void {
+    // Clear any existing timer
+    clearIdleTimer(sessionId);
+
+    console.log(
+      `[server] Session ${sessionId} — starting 5-min idle shutdown timer`
+    );
+
+    const timer = setTimeout(() => {
+      idleTimers.delete(sessionId);
+      finalizeSession(sessionId);
+    }, IDLE_TIMEOUT_MS);
+
+    idleTimers.set(sessionId, timer);
+  }
+
+  function clearIdleTimer(sessionId: string): void {
+    const existing = idleTimers.get(sessionId);
+    if (existing) {
+      clearTimeout(existing);
+      idleTimers.delete(sessionId);
+      console.log(
+        `[server] Session ${sessionId} — cleared idle shutdown timer`
+      );
+    }
+  }
+
+  /**
+   * Finalize a session: set status to completed, emit session:complete,
+   * tell workers to stop, and persist.
+   */
+  function finalizeSession(sessionId: string): void {
+    const session = getSession(sessionId);
+    if (!session || session.status === "completed" || session.status === "failed") return;
+
+    const room = `session:${sessionId}`;
+    session.status = "completed";
+
+    io.to(room).emit("session:complete", { sessionId });
+    io.to(room).emit("task:none");
+
+    console.log(`[server] Session ${sessionId} — finalized (idle timeout or manual)`);
+
+    persistSessionStatus(sessionId, "completed", new Date()).catch(
+      console.error
+    );
+  }
+
+  /**
+   * Assign tasks to idle agents in a session. Used both after initial
+   * stream_ready and after follow-up decomposition.
+   */
+  function assignTasksToIdleAgents(sessionId: string): void {
+    const session = getSession(sessionId);
+    if (!session) return;
+
+    const idleAgents = session.agents.filter(
+      (a) => a.status === "idle" || a.status === "active"
+    ).filter((a) => !a.currentTaskId);
+
+    for (const agent of idleAgents) {
+      const nextTask = getNextPendingTask(sessionId);
+      if (!nextTask) break;
+
+      assignTask(sessionId, nextTask.id, agent.id);
+      io.to(`session:${sessionId}`).emit("task:assigned", {
+        todoId: nextTask.id,
+        agentId: agent.id,
+      });
+
+      // Send task to the specific worker socket
+      const whiteboard = getWhiteboard(sessionId);
+      const room = `session:${sessionId}`;
+      io.to(room).emit("task:assign", {
+        taskId: nextTask.id,
+        description: nextTask.description,
+        whiteboard,
+      });
+    }
+  }
+
   io.on("connection", (socket) => {
     console.log(`[socket.io] Client connected: ${socket.id}`);
 
@@ -58,6 +156,86 @@ app.prepare().then(() => {
     socket.on("session:leave", (sessionId) => {
       socket.leave(`session:${sessionId}`);
       console.log(`[socket.io] ${socket.id} left session:${sessionId}`);
+    });
+
+    socket.on("session:stop", (data: { sessionId: string }) => {
+      const { sessionId } = data;
+      const session = getSession(sessionId);
+      if (!session) return;
+
+      console.log(`[socket.io] Stopping session ${sessionId}`);
+
+      // Clear any idle timer
+      clearIdleTimer(sessionId);
+
+      // Mark all agents as terminated
+      session.agents.forEach((agent) => {
+        updateAgentStatus(sessionId, agent.id, "terminated");
+      });
+
+      // Tell all workers to stop
+      io.to(`session:${sessionId}`).emit("task:none");
+
+      // Notify browser clients
+      session.agents.forEach((agent) => {
+        io.to(`session:${sessionId}`).emit("agent:terminated", {
+          agentId: agent.id,
+        });
+      });
+
+      // Mark session as failed (user-stopped)
+      session.status = "failed";
+      persistSessionStatus(sessionId, "failed", new Date()).catch(
+        console.error
+      );
+
+      console.log(`[server] Session ${sessionId} stopped by user`);
+    });
+
+    // --- Follow-up instructions from browser ---
+    socket.on("session:followup", async (data: SessionFollowUpEvent) => {
+      const { sessionId, prompt } = data;
+      const session = getSession(sessionId);
+      if (!session || session.status === "completed" || session.status === "failed") return;
+
+      console.log(
+        `[server] Session ${sessionId} — received follow-up: "${prompt}"`
+      );
+
+      // Clear the idle timer since new work is coming
+      clearIdleTimer(sessionId);
+
+      // Decompose the follow-up prompt
+      try {
+        const idleAgentCount = session.agents.filter(
+          (a) => a.status === "idle" || a.status === "active"
+        ).filter((a) => !a.currentTaskId).length;
+        const targetCount = Math.max(idleAgentCount, 1);
+
+        const descriptions = await decomposeTasks(prompt, targetCount);
+        const newTodos = addTodos(sessionId, descriptions);
+
+        // Persist new todos
+        persistTodos(sessionId, newTodos).catch(console.error);
+
+        // Emit task:created for each new todo
+        const room = `session:${sessionId}`;
+        for (const todo of newTodos) {
+          io.to(room).emit("task:created", todo);
+        }
+
+        // Assign new tasks to idle agents
+        assignTasksToIdleAgents(sessionId);
+
+        console.log(
+          `[server] Session ${sessionId} — follow-up decomposed into ${newTodos.length} tasks`
+        );
+      } catch (error) {
+        console.error(
+          `[server] Session ${sessionId} — failed to decompose follow-up:`,
+          error
+        );
+      }
     });
 
     // --- Worker events ---
@@ -103,10 +281,8 @@ app.prepare().then(() => {
           description: nextTask.description,
           whiteboard,
         });
-      } else if (isSessionFullyComplete(sessionId)) {
-        // Only terminate if all tasks are done; otherwise agent idles
-        socket.emit("task:none");
       }
+      // Agent idles if no pending tasks — don't terminate
     });
 
     socket.on("agent:thinking", (data: AgentThinkingEvent) => {
@@ -151,6 +327,9 @@ app.prepare().then(() => {
       const { todoId, agentId, result } = data;
       completeTask(sessionId, todoId, result);
 
+      // Persist todo completion to database
+      persistTodoStatus(todoId, "completed", result).catch(console.error);
+
       io.to(`session:${sessionId}`).emit("task:completed", {
         todoId,
         agentId,
@@ -173,11 +352,15 @@ app.prepare().then(() => {
           whiteboard,
         });
       } else if (isSessionFullyComplete(sessionId)) {
-        // All tasks done — notify browser and terminate all idle workers
+        // All tasks done — emit tasks_done, start idle timer
         const room = `session:${sessionId}`;
-        io.to(room).emit("session:complete", { sessionId });
-        io.to(room).emit("task:none");
-        console.log(`[server] Session ${sessionId} — all tasks completed`);
+        io.to(room).emit("session:tasks_done", { sessionId });
+        console.log(
+          `[server] Session ${sessionId} — all tasks completed, agents idling`
+        );
+
+        // Start 5-min idle timer (agents stay alive for follow-ups)
+        startIdleTimer(sessionId);
       }
       // Otherwise: no pending tasks but session not complete — agent idles
     });
@@ -206,7 +389,8 @@ app.prepare().then(() => {
         agentId: data.agentId,
       });
 
-      checkSessionComplete(sessionId);
+      // Don't trigger completion from agent termination — agents now stay alive.
+      // Session completion is handled by the idle timer.
     });
 
     socket.on("disconnect", () => {
@@ -241,25 +425,4 @@ function isSessionFullyComplete(sessionId: string): boolean {
   const session = getSession(sessionId);
   if (!session) return true;
   return session.todos.length > 0 && session.todos.every((t) => t.status === "completed");
-}
-
-function checkSessionComplete(sessionId: string): void {
-  const session = getSession(sessionId);
-  if (!session) return;
-
-  const allTerminated = session.agents.every(
-    (a) => a.status === "terminated"
-  );
-  const allCompleted = session.todos.every((t) => t.status === "completed");
-
-  if (allTerminated && allCompleted) {
-    session.status = "completed";
-    try {
-      const io = getIO();
-      io.to(`session:${sessionId}`).emit("session:complete", { sessionId });
-    } catch {
-      // Socket.io may not be available
-    }
-    console.log(`[server] Session ${sessionId} complete`);
-  }
 }

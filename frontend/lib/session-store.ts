@@ -9,7 +9,8 @@ const sessions = (globalStore.__panopticon_sessions ??= new Map<string, Session>
 export function createSession(
   id: string,
   prompt: string,
-  agentCount: number
+  agentCount: number,
+  userId?: string
 ): Session {
   const session: Session = {
     id,
@@ -20,6 +21,7 @@ export function createSession(
     agents: [],
     createdAt: Date.now(),
     whiteboard: "",
+    userId,
   };
   sessions.set(id, session);
   return session;
@@ -44,10 +46,19 @@ export function addTodos(sessionId: string, descriptions: string[]): Todo[] {
   return newTodos;
 }
 
-export function updateTodos(sessionId: string, todos: Todo[]): void {
+export function updateTodos(sessionId: string, descriptions: string[]): Todo[] {
   const session = sessions.get(sessionId);
   if (!session) throw new Error(`Session ${sessionId} not found`);
-  session.todos = todos;
+
+  const newTodos: Todo[] = descriptions.map((description) => ({
+    id: uuidv4(),
+    description,
+    status: "pending" as const,
+    assignedTo: null,
+  }));
+
+  session.todos = newTodos;
+  return newTodos;
 }
 
 export function approveSession(sessionId: string): void {
@@ -101,10 +112,6 @@ export function completeTask(
     agent.currentTaskId = null;
     agent.status = "idle";
     agent.tasksCompleted = (agent.tasksCompleted || 0) + 1;
-  }
-
-  if (session.todos.every((t) => t.status === "completed")) {
-    session.status = "completed";
   }
 
   return todo;

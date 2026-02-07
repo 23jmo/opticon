@@ -8,16 +8,31 @@ import {
 import { getIO } from "@/lib/socket";
 import { spawnWorkers } from "@/lib/worker-manager";
 import type { Todo } from "@/lib/types";
+import { auth } from "@/auth";
+import { getMaxAgentsForUser } from "@/lib/billing";
+import {
+  replaceTodos,
+  persistSessionStatus,
+} from "@/lib/db/session-persist";
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authSession = await auth();
+  if (!authSession?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { id: sessionId } = await params;
   const session = getSession(sessionId);
 
   if (!session) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  }
+
+  if (session.userId && session.userId !== authSession.user.id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   if (session.status !== "pending_approval") {
@@ -26,6 +41,8 @@ export async function POST(
       { status: 400 }
     );
   }
+
+  const maxAgents = await getMaxAgentsForUser(authSession.user.id);
 
   const body = await request.json();
   const { tasks, agentCount } = body as {
@@ -47,6 +64,17 @@ export async function POST(
     );
   }
 
+  if (agentCount > maxAgents) {
+    return NextResponse.json(
+      {
+        error: `Your plan allows up to ${maxAgents} agents.`,
+        code: "PLAN_LIMIT_EXCEEDED",
+        maxAgents,
+      },
+      { status: 403 }
+    );
+  }
+
   // Update tasks — assign new IDs for any tasks added by the user
   const updatedTodos: Todo[] = tasks.map((t) => ({
     id: t.id.startsWith("new-") ? uuidv4() : t.id,
@@ -55,11 +83,17 @@ export async function POST(
     assignedTo: null,
   }));
 
-  updateTodos(sessionId, updatedTodos);
+  updateTodos(sessionId, updatedTodos.map((t) => t.description));
   session.agentCount = agentCount;
+
+  // Persist updated todos to database
+  replaceTodos(sessionId, updatedTodos).catch(console.error);
 
   // Approve: sets status to "running"
   approveSession(sessionId);
+
+  // Persist status update
+  persistSessionStatus(sessionId, "running").catch(console.error);
 
   // Emit task:created events
   try {

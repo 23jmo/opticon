@@ -5,8 +5,10 @@ import { Agent } from "@/lib/types";
 import { AgentActivity } from "@/lib/mock-data";
 import { AgentScreen } from "./agent-screen";
 import { VMTab } from "./vm-tab";
-import { ChevronLeft, ChevronRight, RotateCw, Lock, Mouse, Eye } from "lucide-react";
+import { Send, Ellipsis, X, Mouse, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 interface AgentBrowserProps {
   agents: Agent[];
@@ -15,6 +17,7 @@ interface AgentBrowserProps {
   agentActivities: Record<string, AgentActivity>;
   sessionId?: string;
   whiteboard?: string;
+  onAgentCommand?: (agentId: string, message: string) => void;
 }
 
 export function AgentBrowser({
@@ -24,123 +27,95 @@ export function AgentBrowser({
   agentActivities,
   sessionId,
   whiteboard,
+  onAgentCommand,
 }: AgentBrowserProps) {
   const [isInteractive, setIsInteractive] = useState(false);
   const isMock = sessionId === "demo";
   const isWhiteboardTab = activeAgentId === "__whiteboard__";
-  const activity = !isWhiteboardTab ? agentActivities[activeAgentId] : undefined;
   const activeAgent = agents.find((a) => a.id === activeAgentId);
+  const [chatInput, setChatInput] = useState("");
+
+  const handleSendCommand = () => {
+    const trimmed = chatInput.trim();
+    if (!trimmed) return;
+    onAgentCommand?.(activeAgentId, trimmed);
+    setChatInput("");
+  };
 
   return (
     <div className="flex h-full flex-col rounded-xl border border-border bg-muted/30 overflow-hidden shadow-xl shadow-black/20">
-      {/* Window chrome: traffic lights + tabs */}
-      <div className="flex items-center bg-muted/60 pl-3 pr-2 pt-2.5 pb-0">
-        {/* Traffic lights */}
-        <div className="flex gap-1.5 mr-3 mb-2 shrink-0">
-          <div className="size-[11px] rounded-full bg-[#ff5f57]" />
-          <div className="size-[11px] rounded-full bg-[#febc2e]" />
-          <div className="size-[11px] rounded-full bg-[#28c840]" />
-        </div>
+      {/* Tab bar */}
+      <div className="flex items-stretch border-b border-border">
+        {agents.map((agent, i) => {
+          const isActive = agent.id === activeAgentId && !isWhiteboardTab;
 
-        {/* Tabs */}
-        <div className="flex gap-0.5 min-w-0">
-          {agents.map((agent) => {
-            const isActive = agent.id === activeAgentId;
-            const agentActivity = agentActivities[agent.id];
-
-            return (
-              <button
-                key={agent.id}
-                onClick={() => onTabChange(agent.id)}
-                className={cn(
-                  "flex items-center gap-2 rounded-t-lg px-4 py-2 text-[11px] font-medium transition-all min-w-0",
-                  isActive
-                    ? "bg-muted text-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                )}
-              >
-                <span
-                  className={cn(
-                    "size-1.5 rounded-full shrink-0",
-                    agent.status === "active"
-                      ? "bg-emerald-400"
-                      : agent.status === "terminated"
-                        ? "bg-zinc-600"
-                        : agent.status === "error"
-                          ? "bg-red-400"
-                          : agent.status === "booting"
-                            ? "bg-amber-400 animate-pulse"
-                            : "bg-amber-400 animate-pulse"
-                  )}
-                />
-                <span className="truncate">
-                  {agentActivity?.label || `Agent ${agent.id.slice(0, 6)}`}
-                </span>
-              </button>
-            );
-          })}
-
-          {/* Whiteboard tab */}
-          {whiteboard !== undefined && (
+          return (
             <button
-              onClick={() => onTabChange("__whiteboard__")}
+              key={agent.id}
+              onClick={() => onTabChange(agent.id)}
               className={cn(
-                "flex items-center gap-2 rounded-t-lg px-4 py-2 text-[11px] font-medium transition-all min-w-0",
-                isWhiteboardTab
-                  ? "bg-muted text-foreground"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                "group flex items-center gap-3 px-4 py-2.5 text-[13px] transition-colors min-w-0",
+                isActive
+                  ? "bg-background text-foreground"
+                  : "bg-muted/40 text-muted-foreground hover:text-foreground"
               )}
             >
-              <span className="size-1.5 rounded-full shrink-0 bg-primary" />
-              <span className="truncate">Whiteboard</span>
+              {/* Number badge */}
+              <span className="flex items-center justify-center size-5 rounded-full border border-border text-[11px] tabular-nums shrink-0">
+                {i + 1}
+              </span>
+
+              {/* Agent name */}
+              <span className="truncate font-medium">
+                {agent.id}
+              </span>
+
+              {/* Menu + close */}
+              <span
+                className={cn(
+                  "flex items-center gap-1 shrink-0 ml-1",
+                  isActive
+                    ? "text-muted-foreground"
+                    : "opacity-0 group-hover:opacity-100 text-muted-foreground"
+                )}
+              >
+                <Ellipsis className="size-4" />
+                <X className="size-4" />
+              </span>
             </button>
-          )}
-        </div>
-      </div>
+          );
+        })}
 
-      {/* Address bar */}
-      <div className="flex items-center gap-2 border-b border-border bg-muted px-3 py-1.5">
-        <div className="flex items-center gap-0.5 text-muted-foreground/40 shrink-0">
-          <ChevronLeft className="size-4" />
-          <ChevronRight className="size-4" />
-          <RotateCw className="size-3 ml-1" />
-        </div>
+        {/* Whiteboard tab */}
+        {whiteboard !== undefined && (
+          <button
+            onClick={() => onTabChange("__whiteboard__")}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2.5 text-[13px] font-medium transition-colors min-w-0",
+              isWhiteboardTab
+                ? "bg-background text-foreground"
+                : "bg-muted/40 text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <span className="flex items-center justify-center size-5 rounded-full border border-primary/30 bg-primary/10 text-[11px] text-primary shrink-0">
+              W
+            </span>
+            <span className="truncate">Whiteboard</span>
+          </button>
+        )}
 
-        <div className="flex-1 flex items-center gap-2 rounded-full bg-background/80 px-3 py-1 min-w-0">
-          {isWhiteboardTab ? (
-            <span className="text-[11px] text-muted-foreground font-mono truncate">
-              whiteboard://shared
-            </span>
-          ) : activity?.url ? (
-            <>
-              <Lock className="size-3 text-muted-foreground/40 shrink-0" />
-              <span className="text-[11px] text-muted-foreground font-mono truncate">
-                {activity.url}
-              </span>
-            </>
-          ) : activeAgent?.streamUrl ? (
-            <>
-              <Lock className="size-3 text-muted-foreground/40 shrink-0" />
-              <span className="text-[11px] text-muted-foreground font-mono truncate">
-                e2b-desktop://stream
-              </span>
-            </>
-          ) : (
-            <span className="text-[11px] text-muted-foreground/40">
-              Waiting for connection...
-            </span>
-          )}
-        </div>
+        {/* Spacer to push interactive toggle to the right */}
+        <div className="flex-1" />
 
         {/* Interactive mode toggle */}
         {!isWhiteboardTab && !isMock && activeAgent?.streamUrl && (
           <button
             onClick={() => setIsInteractive((prev) => !prev)}
             className={cn(
-              "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-all shrink-0",
+              "flex items-center gap-1.5 px-3 py-2.5 text-[11px] font-medium transition-all shrink-0 self-center mr-2",
               isInteractive
-                ? "bg-primary/15 text-primary border border-primary/30"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/80"
+                ? "text-primary"
+                : "text-muted-foreground hover:text-foreground"
             )}
             title={isInteractive ? "Switch to view-only" : "Take control of desktop"}
           >
@@ -163,7 +138,7 @@ export function AgentBrowser({
           </div>
         )}
 
-        {/* Agent tabs — all rendered to keep iframes alive across tab switches */}
+        {/* Agent tabs -- all rendered to keep iframes alive across tab switches */}
         {agents.map((agent) => {
           const isActive = agent.id === activeAgentId && !isWhiteboardTab;
           const agentActivity = agentActivities[agent.id];
@@ -192,6 +167,35 @@ export function AgentBrowser({
           );
         })}
       </div>
+
+      {/* Chat input */}
+      {!isWhiteboardTab && (
+        <div className="shrink-0 border-t border-border bg-card px-3 py-2">
+          <div className="flex items-center gap-2">
+            <Input
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendCommand();
+                }
+              }}
+              placeholder="Send a command to this agent..."
+              className="h-8 text-sm bg-background"
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 shrink-0 text-muted-foreground hover:text-primary"
+              onClick={handleSendCommand}
+              disabled={!chatInput.trim()}
+            >
+              <Send className="size-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

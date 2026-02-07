@@ -57,12 +57,16 @@ export const MOCK_THINKING_ENTRIES: ThinkingEntry[] = [
     agentId: "agent-001",
     timestamp: new Date(now - 50000).toISOString(),
     action: "Opening Chrome browser",
+    toolName: "click",
+    toolArgs: { x: 48, y: 720, element: "Chrome icon" },
   },
   {
     id: "t-002-1",
     agentId: "agent-002",
     timestamp: new Date(now - 48000).toISOString(),
     action: "Opening Google Docs",
+    toolName: "click",
+    toolArgs: { x: 312, y: 245, element: "Google Docs shortcut" },
   },
   {
     id: "t-001-2",
@@ -71,12 +75,16 @@ export const MOCK_THINKING_ENTRIES: ThinkingEntry[] = [
     action: "Navigating to Google Scholar",
     reasoning:
       "I need to find academic papers about Daedalus Labs to support the research paper with credible sources.",
+    toolName: "type_text",
+    toolArgs: { text: "scholar.google.com" },
   },
   {
     id: "t-003-1",
     agentId: "agent-003",
     timestamp: new Date(now - 42000).toISOString(),
     action: "Opening terminal",
+    toolName: "click",
+    toolArgs: { x: 96, y: 720, element: "Terminal icon" },
   },
   {
     id: "t-002-2",
@@ -85,12 +93,24 @@ export const MOCK_THINKING_ENTRIES: ThinkingEntry[] = [
     action: "Creating new document",
     reasoning:
       "Setting up the research paper document with proper formatting before other agents contribute content.",
+    toolName: "click",
+    toolArgs: { x: 200, y: 180, element: "Blank document" },
   },
   {
     id: "t-001-3",
     agentId: "agent-001",
     timestamp: new Date(now - 36000).toISOString(),
     action: 'Searching for "Daedalus Labs AI agents multi-agent systems"',
+    toolName: "type_text",
+    toolArgs: { text: "Daedalus Labs AI agents multi-agent systems" },
+  },
+  {
+    id: "t-001-3b",
+    agentId: "agent-001",
+    timestamp: new Date(now - 35500).toISOString(),
+    action: "Submitting search query",
+    toolName: "press_key",
+    toolArgs: { key: "Enter" },
   },
   {
     id: "t-003-2",
@@ -99,12 +119,16 @@ export const MOCK_THINKING_ENTRIES: ThinkingEntry[] = [
     action: "Running market data collection script",
     reasoning:
       "Collecting public data on AI agent startups, funding rounds, and market positioning for competitive landscape analysis.",
+    toolName: "type_text",
+    toolArgs: { text: "python collect_market_data.py" },
   },
   {
     id: "t-002-3",
     agentId: "agent-002",
     timestamp: new Date(now - 30000).toISOString(),
     action: 'Setting document title: "The Rise of Daedalus Labs"',
+    toolName: "type_text",
+    toolArgs: { text: "The Rise of Daedalus Labs" },
   },
   {
     id: "t-001-4",
@@ -113,12 +137,16 @@ export const MOCK_THINKING_ENTRIES: ThinkingEntry[] = [
     action: "Reading paper: Multi-Agent Orchestration Frameworks",
     reasoning:
       "This paper discusses the foundational architecture that Daedalus Labs builds upon. Key sections on agent coordination and task decomposition are directly relevant.",
+    toolName: "click",
+    toolArgs: { x: 345, y: 312, element: "Paper title link" },
   },
   {
     id: "t-003-3",
     agentId: "agent-003",
     timestamp: new Date(now - 22000).toISOString(),
     action: "Analyzing Daedalus Labs GitHub repositories",
+    toolName: "type_text",
+    toolArgs: { text: "python analyze_repos.py --org daedalus-labs" },
   },
   {
     id: "t-002-4",
@@ -127,6 +155,10 @@ export const MOCK_THINKING_ENTRIES: ThinkingEntry[] = [
     action: "Writing introduction section",
     reasoning:
       "Starting with the thesis: Daedalus Labs has fundamentally changed how AI agents interact with computing environments.",
+    toolName: "type_text",
+    toolArgs: {
+      text: "The landscape of artificial intelligence has undergone a fundamental transformation...",
+    },
   },
   {
     id: "t-003-4",
@@ -135,12 +167,16 @@ export const MOCK_THINKING_ENTRIES: ThinkingEntry[] = [
     action: "Generating comparison charts",
     reasoning:
       "Creating visual charts comparing Daedalus Labs vs competitors in architecture, performance, and developer experience.",
+    toolName: "type_text",
+    toolArgs: { text: "python generate_charts.py" },
   },
   {
     id: "t-001-5",
     agentId: "agent-001",
     timestamp: new Date(now - 12000).toISOString(),
-    action: "Extracting key findings and saving notes",
+    action: "Scrolling through research paper",
+    toolName: "scroll",
+    toolArgs: { direction: "down", amount: 5 },
   },
   {
     id: "t-004-1",
@@ -152,7 +188,9 @@ export const MOCK_THINKING_ENTRIES: ThinkingEntry[] = [
     id: "t-002-5",
     agentId: "agent-002",
     timestamp: new Date(now - 8000).toISOString(),
-    action: "Creating outline for remaining sections",
+    action: "Moving cursor to outline section",
+    toolName: "move_mouse",
+    toolArgs: { x: 400, y: 520 },
   },
   {
     id: "t-001-6",
@@ -161,6 +199,8 @@ export const MOCK_THINKING_ENTRIES: ThinkingEntry[] = [
     action: "Searching for market analysis reports",
     reasoning:
       "Need industry reports on AI agent market size and growth projections for the market analysis section.",
+    toolName: "type_text",
+    toolArgs: { text: "AI agent market size 2024 report" },
   },
   {
     id: "t-004-2",

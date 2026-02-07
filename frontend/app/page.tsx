@@ -2,15 +2,27 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSession, signOut } from "next-auth/react";
+import { useBilling } from "@flowglad/nextjs";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2 } from "lucide-react";
+import { Loader2, LogOut, PanelLeft, Lock } from "lucide-react";
+import { SessionHistorySidebar } from "@/components/session-history-sidebar";
+import { PlanBadge } from "@/components/plan-badge";
+import { PLAN_LIMITS, PRO_FEATURE_SLUG } from "@/lib/billing-constants";
+import Link from "next/link";
 
 export default function Home() {
+  const { data: authSession } = useSession();
+  const { checkFeatureAccess } = useBilling();
   const [prompt, setPrompt] = useState("");
   const [agentCount, setAgentCount] = useState(2);
+
+  const isPro = checkFeatureAccess?.(PRO_FEATURE_SLUG) ?? false;
+  const maxAgents = isPro ? PLAN_LIMITS.pro.maxAgents : PLAN_LIMITS.free.maxAgents;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const router = useRouter();
 
   const handleSubmit = async () => {
@@ -59,7 +71,52 @@ export default function Home() {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center">
+      <SessionHistorySidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+
+      {/* Sidebar toggle — top-left, hidden when sidebar open */}
+      {authSession?.user && !sidebarOpen && (
+        <button
+          onClick={() => setSidebarOpen(true)}
+          className="fixed left-4 top-4 z-30 flex size-8 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
+        >
+          <PanelLeft className="size-4" />
+        </button>
+      )}
+
       <div className="dot-grid absolute inset-0 pointer-events-none" />
+
+        {authSession?.user && (
+          <div className="absolute top-4 right-4 z-20 flex items-center gap-3">
+            {authSession.user.image ? (
+              <img
+                src={authSession.user.image}
+                alt=""
+                className="size-8 rounded-full"
+              />
+            ) : (
+              <div className="flex size-8 items-center justify-center rounded-full bg-primary/20 text-xs font-medium text-primary">
+                {authSession.user.name?.[0] || authSession.user.email?.[0] || "?"}
+              </div>
+            )}
+            <span className="text-sm text-zinc-400">
+              {authSession.user.name || authSession.user.email}
+            </span>
+            <PlanBadge />
+            <Link href="/pricing">
+              <Button variant="ghost" size="sm" className="text-zinc-500 hover:text-zinc-300 text-xs">
+                Pricing
+              </Button>
+            </Link>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => signOut()}
+              className="text-zinc-500 hover:text-zinc-300"
+            >
+              <LogOut className="size-4" />
+            </Button>
+          </div>
+        )}
 
       <main className="relative z-10 w-full max-w-2xl px-6">
         <div className="space-y-8">
@@ -91,21 +148,37 @@ export default function Home() {
                   Agents
                 </span>
                 <div className="flex gap-1">
-                  {[1, 2, 3, 4].map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      onClick={() => setAgentCount(n)}
-                      disabled={isSubmitting}
-                      className={`flex size-7 items-center justify-center rounded-md text-xs font-medium transition-all ${
-                        agentCount === n
-                          ? "bg-primary/15 text-primary ring-1 ring-primary/30"
-                          : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
-                      }`}
-                    >
-                      {n}
-                    </button>
-                  ))}
+                  {[1, 2, 3, 4].map((n) => {
+                    const isLocked = n > maxAgents;
+                    return (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => {
+                          if (isLocked) {
+                            router.push("/pricing");
+                          } else {
+                            setAgentCount(n);
+                          }
+                        }}
+                        disabled={isSubmitting}
+                        title={isLocked ? "Upgrade to Pro to unlock" : undefined}
+                        className={`flex size-7 items-center justify-center rounded-md text-xs font-medium transition-all ${
+                          isLocked
+                            ? "text-zinc-700 cursor-pointer hover:text-zinc-500"
+                            : agentCount === n
+                              ? "bg-primary/15 text-primary ring-1 ring-primary/30"
+                              : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+                        }`}
+                      >
+                        {isLocked ? (
+                          <Lock className="size-3" />
+                        ) : (
+                          n
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -149,6 +222,20 @@ export default function Home() {
             </kbd>
             <span className="ml-1.5">to launch</span>
           </p>
+
+          {/* Demo shortcut */}
+          <div className="flex justify-center">
+            <button
+              onClick={() =>
+                router.push(
+                  "/session/demo?prompt=Write+a+comprehensive+research+paper+on+Google+Docs+about+the+rise+of+Daedalus+Labs&agents=4"
+                )
+              }
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4 decoration-border"
+            >
+              or try the demo
+            </button>
+          </div>
 
           {/* Error */}
           {error && (
