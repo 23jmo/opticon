@@ -179,6 +179,20 @@ export default function Home() {
             <span className="ml-1.5">to launch</span>
           </p>
 
+          {/* Demo shortcut */}
+          <div className="flex justify-center">
+            <button
+              onClick={() =>
+                router.push(
+                  "/session/demo?prompt=Write+a+comprehensive+research+paper+on+Google+Docs+about+the+rise+of+Daedalus+Labs&agents=4"
+                )
+              }
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4 decoration-border"
+            >
+              or try the demo
+            </button>
+          </div>
+
           {/* Error */}
           {error && (
             <div className="animate-slide-in rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">

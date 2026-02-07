@@ -147,6 +147,13 @@ export interface ThinkingEntry {
   timestamp: string;
   action: string;
   reasoning?: string;
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
   expanded?: boolean;
   isError?: boolean;
+}
+
+export interface AgentCommandEvent {
+  agentId: string;
+  message: string;
 }
