@@ -27,7 +27,7 @@ Full specification: `SPEC.md`
 - **Real-time**: Socket.io (one room per session)
 - **Agent brain**: Daedalus Labs Python SDK (`dedalus_labs` pip package)
 - **Computer use**: E2B Desktop Python SDK (`e2b-desktop` pip package)
-- **Orchestrator**: Claude API (server-side key, Anthropic SDK)
+- **Orchestrator**: Dedalus Labs TypeScript SDK (`dedalus-labs` npm package)
 - **Desktop streaming**: E2B built-in streaming
 - **Deployment**: Local development only
 
@@ -49,9 +49,8 @@ python worker.py                  # Start a single agent worker (invoked by back
 
 Required in `.env.local`:
 ```
-ANTHROPIC_API_KEY=       # Claude API for orchestrator
+DEDALUS_API_KEY=         # Dedalus Labs SDK (orchestrator + agent workers)
 E2B_API_KEY=             # E2B sandbox provisioning
-DEDALUS_API_KEY=         # Daedalus Labs agent SDK
 ```
 
 ## Directory Structure Conventions

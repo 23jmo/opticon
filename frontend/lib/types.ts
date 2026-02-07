@@ -1,25 +1,63 @@
-export interface Session {
-  id: string;
-  prompt: string;
-  agentCount: number;
-  status: "pending" | "running" | "completed" | "error";
-  createdAt: string;
-}
+export type SessionStatus = "decomposing" | "running" | "completed" | "failed";
 
-export interface Task {
+export interface Todo {
   id: string;
   description: string;
   status: "pending" | "assigned" | "completed";
-  assignedTo?: string; // agent ID
+  assignedTo: string | null;
+  result?: string;
 }
 
 export interface Agent {
   id: string;
   sessionId: string;
-  status: "initializing" | "active" | "terminated";
+  status: "booting" | "working" | "idle" | "terminated";
+  currentTaskId: string | null;
+  sandboxId?: string;
   streamUrl?: string;
 }
 
+export interface Session {
+  id: string;
+  prompt: string;
+  agentCount: number;
+  status: SessionStatus;
+  todos: Todo[];
+  agents: Agent[];
+  createdAt: number;
+}
+
+export interface ServerToClientEvents {
+  "task:created": (todo: Todo) => void;
+  "task:assigned": (payload: { todoId: string; agentId: string }) => void;
+  "task:completed": (payload: {
+    todoId: string;
+    agentId: string;
+    result?: string;
+  }) => void;
+  "agent:thinking": (payload: {
+    agentId: string;
+    action: string;
+    timestamp: number;
+  }) => void;
+  "agent:reasoning": (payload: {
+    agentId: string;
+    reasoning: string;
+    timestamp: number;
+  }) => void;
+  "agent:terminated": (payload: { agentId: string }) => void;
+  "session:complete": (payload: { sessionId: string }) => void;
+}
+
+export interface ClientToServerEvents {
+  "session:join": (sessionId: string) => void;
+  "session:leave": (sessionId: string) => void;
+}
+
+// Alias for frontend components that use "Task" instead of "Todo"
+export type Task = Todo;
+
+// Frontend-specific types (used by UI components)
 export interface ThinkingEntry {
   id: string;
   agentId: string;
@@ -27,42 +65,4 @@ export interface ThinkingEntry {
   action: string;
   reasoning?: string;
   expanded?: boolean;
-}
-
-// Socket.io event payloads
-export interface TaskCreatedEvent {
-  task: Task;
-}
-
-export interface TaskAssignedEvent {
-  taskId: string;
-  agentId: string;
-}
-
-export interface AgentThinkingEvent {
-  agentId: string;
-  action: string;
-  timestamp: string;
-}
-
-export interface AgentReasoningEvent {
-  agentId: string;
-  reasoning: string;
-  timestamp: string;
-  actionId?: string; // Link to thinking entry
-}
-
-export interface AgentStreamReadyEvent {
-  agentId: string;
-  streamUrl: string;
-}
-
-export interface AgentTerminatedEvent {
-  agentId: string;
-}
-
-export interface SessionCompleteEvent {
-  sessionId: string;
-  tasks: Task[];
-  agents: Agent[];
 }
