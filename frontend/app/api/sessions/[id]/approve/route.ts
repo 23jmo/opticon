@@ -9,6 +9,7 @@ import { getIO } from "@/lib/socket";
 import { spawnWorkers } from "@/lib/worker-manager";
 import type { Todo } from "@/lib/types";
 import { auth } from "@/auth";
+import { getMaxAgentsForUser } from "@/lib/billing";
 import {
   replaceTodos,
   persistSessionStatus,
@@ -41,6 +42,8 @@ export async function POST(
     );
   }
 
+  const maxAgents = await getMaxAgentsForUser(authSession.user.id);
+
   const body = await request.json();
   const { tasks, agentCount } = body as {
     tasks: { id: string; description: string }[];
@@ -61,6 +64,17 @@ export async function POST(
     );
   }
 
+  if (agentCount > maxAgents) {
+    return NextResponse.json(
+      {
+        error: `Your plan allows up to ${maxAgents} agents.`,
+        code: "PLAN_LIMIT_EXCEEDED",
+        maxAgents,
+      },
+      { status: 403 }
+    );
+  }
+
   // Update tasks — assign new IDs for any tasks added by the user
   const updatedTodos: Todo[] = tasks.map((t) => ({
     id: t.id.startsWith("new-") ? uuidv4() : t.id,
@@ -69,7 +83,7 @@ export async function POST(
     assignedTo: null,
   }));
 
-  updateTodos(sessionId, updatedTodos);
+  updateTodos(sessionId, updatedTodos.map((t) => t.description));
   session.agentCount = agentCount;
 
   // Persist updated todos to database

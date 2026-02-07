@@ -2,11 +2,14 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useBilling } from "@flowglad/nextjs";
 import { Todo } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Loader2, Sparkles } from "lucide-react";
 import { KanbanBoard } from "@/components/kanban/kanban-board";
+import { UpgradeModal } from "@/components/upgrade-modal";
+import { PLAN_LIMITS, PRO_FEATURE_SLUG } from "@/lib/billing-constants";
 
 export default function ApprovePage() {
   const params = useParams();
@@ -21,6 +24,15 @@ export default function ApprovePage() {
   const [error, setError] = useState<string | null>(null);
   const [refinementInput, setRefinementInput] = useState("");
   const [isRefining, setIsRefining] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [pendingApproval, setPendingApproval] = useState<{
+    tasks: Todo[];
+    agentCount: number;
+  } | null>(null);
+
+  const { checkFeatureAccess } = useBilling();
+  const isPro = checkFeatureAccess?.(PRO_FEATURE_SLUG) ?? false;
+  const maxAgents = isPro ? PLAN_LIMITS.pro.maxAgents : PLAN_LIMITS.free.maxAgents;
 
   useEffect(() => {
     async function fetchSession() {
@@ -49,7 +61,7 @@ export default function ApprovePage() {
     fetchSession();
   }, [sessionId, router]);
 
-  const handleApprove = useCallback(
+  const submitApproval = useCallback(
     async (approvedTasks: Todo[], approvedAgentCount: number) => {
       const validTasks = approvedTasks.filter(
         (t) => t.description.trim().length > 0
@@ -74,6 +86,12 @@ export default function ApprovePage() {
 
         if (!response.ok) {
           const data = await response.json();
+          if (data.code === "PLAN_LIMIT_EXCEEDED") {
+            setPendingApproval({ tasks: validTasks, agentCount: approvedAgentCount });
+            setShowUpgradeModal(true);
+            setIsApproving(false);
+            return;
+          }
           throw new Error(data.error || "Failed to approve session");
         }
 
@@ -85,6 +103,25 @@ export default function ApprovePage() {
     },
     [sessionId, router]
   );
+
+  const handleApprove = useCallback(
+    (approvedTasks: Todo[], approvedAgentCount: number) => {
+      if (approvedAgentCount > maxAgents) {
+        setPendingApproval({ tasks: approvedTasks, agentCount: approvedAgentCount });
+        setShowUpgradeModal(true);
+        return;
+      }
+      submitApproval(approvedTasks, approvedAgentCount);
+    },
+    [maxAgents, submitApproval]
+  );
+
+  const handleUpgradeFallback = useCallback(() => {
+    setShowUpgradeModal(false);
+    if (pendingApproval) {
+      submitApproval(pendingApproval.tasks, maxAgents);
+    }
+  }, [pendingApproval, maxAgents, submitApproval]);
 
   const handleCancel = useCallback(() => {
     router.push("/");
@@ -181,9 +218,17 @@ export default function ApprovePage() {
                 onApprove={handleApprove}
                 isApproving={isApproving}
                 onCancel={handleCancel}
+                maxAgents={maxAgents}
               />
             </div>
           </div>
+
+          <UpgradeModal
+            open={showUpgradeModal}
+            onClose={() => setShowUpgradeModal(false)}
+            onFallback={handleUpgradeFallback}
+            requestedAgents={pendingApproval?.agentCount ?? 0}
+          />
 
           {/* Refinement input */}
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4 space-y-3">

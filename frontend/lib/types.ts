@@ -23,6 +23,7 @@ export interface Todo {
 
 export interface Agent {
   id: string;
+  name: string;
   sessionId: string;
   status: AgentStatus;
   currentTaskId: string | null;
@@ -99,6 +100,15 @@ export interface SessionCompleteEvent {
   sessionId: string;
 }
 
+export interface SessionTasksDoneEvent {
+  sessionId: string;
+}
+
+export interface SessionFollowUpEvent {
+  sessionId: string;
+  prompt: string;
+}
+
 export interface WhiteboardUpdatedEvent {
   sessionId: string;
   content: string;
@@ -115,6 +125,7 @@ export interface ServerToClientEvents {
   "agent:error": (payload: AgentErrorEvent) => void;
   "agent:terminated": (payload: AgentTerminatedEvent) => void;
   "session:complete": (payload: SessionCompleteEvent) => void;
+  "session:tasks_done": (payload: SessionTasksDoneEvent) => void;
   "whiteboard:updated": (payload: WhiteboardUpdatedEvent) => void;
   "task:assign": (payload: {
     taskId: string;
@@ -128,6 +139,7 @@ export interface ClientToServerEvents {
   "session:join": (sessionId: string) => void;
   "session:leave": (sessionId: string) => void;
   "session:stop": (payload: { sessionId: string }) => void;
+  "session:followup": (payload: SessionFollowUpEvent) => void;
   "agent:join": (payload: AgentJoinEvent) => void;
   "agent:stream_ready": (payload: AgentStreamReadyEvent) => void;
   "agent:thinking": (payload: AgentThinkingEvent) => void;

@@ -16,6 +16,7 @@ import {
   AgentErrorEvent,
   TaskCompletedEvent,
   WhiteboardUpdatedEvent,
+  SessionTasksDoneEvent,
 } from "@/lib/types";
 import { createSessionSocket } from "@/lib/socket-client";
 import {
@@ -53,6 +54,9 @@ function SessionContent() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [whiteboard, setWhiteboard] = useState<string>("");
   const [sessionComplete, setSessionComplete] = useState(false);
+  const [tasksComplete, setTasksComplete] = useState(false);
+  const [idleSecondsLeft, setIdleSecondsLeft] = useState<number | null>(null);
+  const idleCountdownRef = useRef<NodeJS.Timeout | null>(null);
   const [isLoading, setIsLoading] = useState(!isMock);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"tabs" | "grid">("tabs");
@@ -83,6 +87,45 @@ function SessionContent() {
     },
     []
   );
+
+  const handleFollowUp = useCallback(
+    (followUpPrompt: string) => {
+      if (socketRef.current) {
+        socketRef.current.emit("session:followup", {
+          sessionId,
+          prompt: followUpPrompt,
+        });
+        // Reset tasks-complete state — agents are working again
+        setTasksComplete(false);
+        setIdleSecondsLeft(null);
+        if (idleCountdownRef.current) {
+          clearInterval(idleCountdownRef.current);
+          idleCountdownRef.current = null;
+        }
+      }
+    },
+    [sessionId]
+  );
+
+  const startIdleCountdown = useCallback(() => {
+    // Clear any existing countdown
+    if (idleCountdownRef.current) {
+      clearInterval(idleCountdownRef.current);
+    }
+    setIdleSecondsLeft(300); // 5 minutes
+    idleCountdownRef.current = setInterval(() => {
+      setIdleSecondsLeft((prev) => {
+        if (prev === null || prev <= 1) {
+          if (idleCountdownRef.current) {
+            clearInterval(idleCountdownRef.current);
+            idleCountdownRef.current = null;
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, []);
 
   // Mock mode: simulate streaming thinking entries
   useEffect(() => {
@@ -134,8 +177,7 @@ function SessionContent() {
             setWhiteboard(data.whiteboard);
           }
           if (data.status === "completed") {
-            setSessionComplete(true);
-            setIsLoading(false);
+            router.replace(`/session/${sessionId}/summary`);
             return;
           }
         }
@@ -194,6 +236,7 @@ function SessionContent() {
       socket.on("agent:join", (data: AgentJoinEvent) => {
         const newAgent: Agent = {
           id: data.agentId,
+          name: data.agentId,
           sessionId: data.sessionId,
           status: "booting",
           currentTaskId: null,
@@ -302,8 +345,14 @@ function SessionContent() {
         setWhiteboard(data.content);
       });
 
+      socket.on("session:tasks_done", (_data: SessionTasksDoneEvent) => {
+        setTasksComplete(true);
+        startIdleCountdown();
+      });
+
       socket.on("session:complete", () => {
         setSessionComplete(true);
+        router.replace(`/session/${sessionId}/summary`);
       });
 
       setIsLoading(false);
@@ -316,8 +365,12 @@ function SessionContent() {
         socketRef.current.disconnect();
         socketRef.current = null;
       }
+      if (idleCountdownRef.current) {
+        clearInterval(idleCountdownRef.current);
+        idleCountdownRef.current = null;
+      }
     };
-  }, [sessionId, isMock, router]);
+  }, [sessionId, isMock, router, startIdleCountdown]);
 
   if (isLoading) {
     return (
@@ -363,12 +416,21 @@ function SessionContent() {
 
   return (
     <div className="flex h-screen flex-col">
-      {/* Completion banner */}
-      {sessionComplete && (
+      {/* Tasks-done banner (agents idle, waiting for follow-up) */}
+      {tasksComplete && (
         <div className="shrink-0 border-b border-emerald-500/20 bg-emerald-500/10 px-5 py-3 flex items-center justify-between">
-          <p className="text-sm text-emerald-400 font-medium">
-            All agents have completed their tasks
-          </p>
+          <div className="flex items-center gap-3">
+            <p className="text-sm text-emerald-400 font-medium">
+              All tasks completed
+            </p>
+            {idleSecondsLeft !== null && idleSecondsLeft > 0 && (
+              <span className="text-xs text-emerald-400/70">
+                Agents idle &mdash;{" "}
+                {Math.floor(idleSecondsLeft / 60)}:
+                {String(idleSecondsLeft % 60).padStart(2, "0")} remaining
+              </span>
+            )}
+          </div>
           <button
             onClick={() => router.push(`/session/${sessionId}/summary`)}
             className="text-sm text-emerald-400 hover:text-emerald-300 font-medium transition-colors"
@@ -384,6 +446,8 @@ function SessionContent() {
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         onStop={handleStop}
+        tasksComplete={tasksComplete}
+        onFollowUp={handleFollowUp}
       />
 
       {/* Main content: browser/grid + thinking sidebar */}

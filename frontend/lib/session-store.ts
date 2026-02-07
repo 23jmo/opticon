@@ -114,10 +114,6 @@ export function completeTask(
     agent.tasksCompleted = (agent.tasksCompleted || 0) + 1;
   }
 
-  if (session.todos.every((t) => t.status === "completed")) {
-    session.status = "completed";
-  }
-
   return todo;
 }
 
