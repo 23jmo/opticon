@@ -17,13 +17,13 @@ SYSTEM_PROMPT = (
     "You are an AI agent controlling a Linux desktop. "
     "You will be shown a screenshot of the current screen before each turn. "
     "Look at the screenshot carefully, then use one of the available tools "
-    "(click, double_click, type_text, press_key, move_mouse) to interact with the desktop. "
+    "(click, double_click, type_text, press_key, move_mouse, scroll) to interact with the desktop. "
     "You can only use ONE tool per turn. After your action, you'll receive a new screenshot. "
     "When the task is complete, call the 'done' tool with a summary."
 )
 
 MODEL = "anthropic/claude-sonnet-4-5-20250929"
-MAX_STEPS = 50
+MAX_STEPS = 500
 
 
 def make_screenshot_message():
@@ -45,19 +45,25 @@ def make_screenshot_message():
     }
 
 
-async def run_agent_loop(client, task_description, on_step=None):
+async def run_agent_loop(client, task_description, whiteboard_content="", on_step=None):
     """
     Observe-think-act loop using Dedalus chat.completions.create().
 
     Each turn:
-      1. Take a screenshot → inject as a user message (image_url)
+      1. Take a screenshot -> inject as a user message (image_url)
       2. Model sees the desktop and returns a tool call
       3. Execute the tool, loop back to 1
 
     Returns the final summary when the model calls 'done'.
     """
+    system_content = SYSTEM_PROMPT
+    if whiteboard_content:
+        system_content += (
+            f"\n\nShared whiteboard (written by other agents):\n{whiteboard_content}"
+        )
+
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_content},
         {"role": "user", "content": f"Your task: {task_description}"},
     ]
 
@@ -120,7 +126,6 @@ async def main():
     session_id = os.environ["SESSION_ID"]
     agent_id = os.environ["AGENT_ID"]
     socket_url = os.environ.get("SOCKET_URL", "http://localhost:3000")
-    todo_file = os.environ["TODO_FILE"]
 
     logging.basicConfig(
         level=logging.INFO,
@@ -130,10 +135,24 @@ async def main():
     # --- Socket.io connection ---
     sio = socketio.AsyncClient()
     await sio.connect(socket_url)
-    await sio.emit("agent:join", {"sessionId": session_id, "agentId": agent_id})
 
     async def emit(event, data):
         await sio.emit(event, {"sessionId": session_id, "agentId": agent_id, **data})
+
+    # Join session room
+    await emit("agent:join", {})
+
+    # --- Register event handlers BEFORE booting sandbox ---
+    task_queue = asyncio.Queue()
+    terminated = asyncio.Event()
+
+    @sio.on("task:assign")
+    async def on_task_assign(data):
+        await task_queue.put(data)
+
+    @sio.on("task:none")
+    async def on_task_none(data=None):
+        terminated.set()
 
     # --- Boot E2B sandbox ---
     desktop = None
@@ -155,58 +174,58 @@ async def main():
     # --- Init Daedalus client ---
     client = AsyncDedalus()
 
-    # --- Task loop ---
     try:
-        while True:
-            tasks = read_todo_file(todo_file)
-            if tasks is None:
-                await asyncio.sleep(2)
-                continue
-
-            my_tasks = [
-                t
-                for t in tasks
-                if t.get("assignedTo") == agent_id and t["status"] == "assigned"
-            ]
-
-            if not my_tasks:
-                all_done = all(t["status"] == "completed" for t in tasks)
-                no_pending = not any(t["status"] == "pending" for t in tasks)
-                if all_done or no_pending:
+        while not terminated.is_set():
+            # Wait for a task or termination signal
+            try:
+                task_data = await asyncio.wait_for(task_queue.get(), timeout=2.0)
+            except asyncio.TimeoutError:
+                if terminated.is_set():
                     break
-                await asyncio.sleep(2)
                 continue
 
-            for task in my_tasks:
-                await emit(
-                    "agent:thinking",
-                    {"action": "Starting task", "detail": task["description"]},
+            task_id = task_data["taskId"]
+            task_description = task_data["description"]
+            whiteboard_content = task_data.get("whiteboard", "")
+
+            await emit(
+                "agent:thinking",
+                {"action": "Starting task", "detail": task_description},
+            )
+            logger.info("Starting task %s: %s", task_id, task_description)
+
+            async def on_step(step, name, args):
+                logger.info("  Step %d: %s(%s)", step, name, args)
+                await emit("agent:thinking", {
+                    "action": f"Tool: {name}",
+                    "detail": json.dumps(args),
+                })
+
+            try:
+                result = await run_agent_loop(
+                    client, task_description,
+                    whiteboard_content=whiteboard_content,
+                    on_step=on_step,
                 )
-                logger.info("Starting task %s: %s", task["id"], task["description"])
-
-                async def on_step(step, name, args):
-                    logger.info("  Step %d: %s(%s)", step, name, args)
-                    await emit("agent:thinking", {
-                        "action": f"Tool: {name}",
-                        "detail": json.dumps(args),
-                    })
-
-                try:
-                    result = await run_agent_loop(
-                        client, task["description"], on_step=on_step
-                    )
-                except Exception as e:
-                    result = f"Error: {e}"
-                    await emit(
-                        "agent:thinking",
-                        {"action": "Task failed", "detail": str(e)},
-                    )
-                    logger.error("Task %s failed: %s", task["id"], e)
-
+            except Exception as e:
+                result = f"Error: {e}"
                 await emit(
-                    "task:completed", {"taskId": task["id"], "result": result}
+                    "agent:error",
+                    {"error": str(e)},
                 )
-                logger.info("Completed task %s", task["id"])
+                logger.error("Task %s failed: %s", task_id, e)
+
+            # Report task completion
+            await emit(
+                "task:completed", {"taskId": task_id, "result": result}
+            )
+            logger.info("Completed task %s", task_id)
+
+            # Write result to whiteboard
+            await emit(
+                "whiteboard:updated",
+                {"content": f"## Agent {agent_id[:6]} - Task Complete\n{result}\n\n"},
+            )
 
     finally:
         if desktop:
@@ -214,15 +233,6 @@ async def main():
         await emit("agent:terminated", {})
         await sio.disconnect()
         logger.info("Worker shut down")
-
-
-def read_todo_file(path):
-    """Read tasks from the shared TODO file. Returns None if unavailable."""
-    try:
-        with open(path, "r") as f:
-            return json.load(f)["tasks"]
-    except (FileNotFoundError, json.JSONDecodeError, KeyError):
-        return None
 
 
 if __name__ == "__main__":

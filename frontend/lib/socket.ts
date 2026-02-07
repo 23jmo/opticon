@@ -3,13 +3,15 @@ import type { ServerToClientEvents, ClientToServerEvents } from "./types";
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
-let io: TypedServer | null = null;
+const globalSocket = globalThis as unknown as {
+  __panopticon_io?: TypedServer;
+};
 
 export function setIO(server: TypedServer): void {
-  io = server;
+  globalSocket.__panopticon_io = server;
 }
 
 export function getIO(): TypedServer {
-  if (!io) throw new Error("Socket.io not initialized");
-  return io;
+  if (!globalSocket.__panopticon_io) throw new Error("Socket.io not initialized");
+  return globalSocket.__panopticon_io;
 }
