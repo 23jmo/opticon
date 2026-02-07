@@ -1,0 +1,4 @@
+dedalus_labs>=0.1.0
+e2b-desktop>=1.0.0
+python-socketio[asyncio_client]>=5.0.0
+python-dotenv>=1.0.0
