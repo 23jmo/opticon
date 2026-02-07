@@ -6,6 +6,7 @@ import {
 } from "@dnd-kit/sortable";
 import { useDroppable } from "@dnd-kit/core";
 import { Plus, X } from "lucide-react";
+import { cn } from "@/lib/utils";
 import type { Todo } from "@/lib/types";
 import { KanbanTaskCard } from "./kanban-task-card";
 
@@ -48,63 +49,60 @@ export function KanbanColumn({
 
   return (
     <div
-      className={`flex w-[300px] shrink-0 flex-col rounded-xl border bg-zinc-900/40 ${
-        isUnassigned
-          ? "border-dashed border-zinc-700"
-          : "border-zinc-800"
-      } ${isOver ? "ring-2 ring-primary/20" : ""}`}
+      className={cn(
+        "flex w-[280px] shrink-0 flex-col transition-colors",
+        isOver && "bg-zinc-800/20 rounded-lg"
+      )}
     >
-      {/* Column header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/50">
-        <div className="flex items-center gap-2.5">
-          <span
-            className="size-2.5 rounded-full shrink-0"
-            style={{
-              backgroundColor: isUnassigned ? "var(--color-muted-foreground)" : accentColor,
-            }}
-          />
-          <span className="text-sm font-medium text-zinc-200">{label}</span>
-          <span className="text-xs text-zinc-600 tabular-nums">
-            {tasks.length}
+      {/* Column header — minimal */}
+      <div className="flex items-center justify-between px-1 py-2 mb-2">
+        <div className="flex items-center gap-2">
+          {!isUnassigned && (
+            <span
+              className="size-2 rounded-sm shrink-0"
+              style={{ backgroundColor: accentColor }}
+            />
+          )}
+          <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+            {label}
           </span>
+          <span className="text-xs text-zinc-600">{tasks.length}</span>
         </div>
         {canRemove && onRemoveColumn && (
           <button
             onClick={onRemoveColumn}
-            className="text-zinc-600 hover:text-zinc-400 transition-colors"
+            className="text-zinc-700 hover:text-zinc-400 transition-colors"
           >
             <X className="size-3.5" />
           </button>
         )}
       </div>
 
-      {/* Task list */}
-      <div className="flex-1 p-2 space-y-2 min-h-[200px] flex flex-col">
-        <div ref={setNodeRef} className="flex-1 space-y-2 min-h-[150px]">
-          <SortableContext
-            items={tasks.map((t) => t.id)}
-            strategy={verticalListSortingStrategy}
-          >
-            {tasks.map((task) => (
-              <KanbanTaskCard
-                key={task.id}
-                task={task}
-                onUpdate={(desc) => onUpdateTask(task.id, desc)}
-                onRemove={() => onRemoveTask(task.id)}
-              />
-            ))}
-          </SortableContext>
-        </div>
-
-        {/* Add task button */}
-        <button
-          onClick={onAddTask}
-          className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-zinc-800 py-2 text-xs text-zinc-600 hover:text-zinc-400 hover:border-zinc-700 transition-colors"
+      {/* Tasks */}
+      <div ref={setNodeRef} className="flex-1 space-y-2 min-h-[100px]">
+        <SortableContext
+          items={tasks.map((t) => t.id)}
+          strategy={verticalListSortingStrategy}
         >
-          <Plus className="size-3" />
-          Add task
-        </button>
+          {tasks.map((task) => (
+            <KanbanTaskCard
+              key={task.id}
+              task={task}
+              onUpdate={(desc) => onUpdateTask(task.id, desc)}
+              onRemove={() => onRemoveTask(task.id)}
+            />
+          ))}
+        </SortableContext>
       </div>
+
+      {/* Add task — minimal */}
+      <button
+        onClick={onAddTask}
+        className="flex items-center gap-1.5 px-1 py-2 mt-1 text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+      >
+        <Plus className="size-3.5" />
+        New
+      </button>
     </div>
   );
 }

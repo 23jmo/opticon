@@ -28,6 +28,7 @@ interface KanbanBoardProps {
   onApprove: (tasks: Todo[], agentCount: number) => void;
   isApproving: boolean;
   onCancel: () => void;
+  maxAgents?: number;
 }
 
 function distributeTasksRoundRobin(
@@ -57,7 +58,9 @@ export function KanbanBoard({
   onApprove,
   isApproving,
   onCancel,
+  maxAgents: maxAgentsProp,
 }: KanbanBoardProps) {
+  const effectiveMaxAgents = maxAgentsProp ?? MAX_AGENTS;
   const initialColumns = Array.from(
     { length: initialAgentCount },
     (_, i) => `agent-${i + 1}`
@@ -214,7 +217,7 @@ export function KanbanBoard({
   }, []);
 
   const handleAddAgent = useCallback(() => {
-    if (agentColumns.length >= MAX_AGENTS) return;
+    if (agentColumns.length >= effectiveMaxAgents) return;
     const nextNum =
       agentColumns.length > 0
         ? Math.max(
@@ -224,7 +227,7 @@ export function KanbanBoard({
     const newCol = `agent-${nextNum}`;
     setAgentColumns((prev) => [...prev, newCol]);
     setTasksByColumn((prev) => ({ ...prev, [newCol]: [] }));
-  }, [agentColumns]);
+  }, [agentColumns, effectiveMaxAgents]);
 
   const handleRemoveAgent = useCallback((columnId: string) => {
     setAgentColumns((prev) => prev.filter((c) => c !== columnId));
@@ -282,7 +285,7 @@ export function KanbanBoard({
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
         >
-          <div className="flex gap-4">
+          <div className="flex gap-6">
             {/* Unassigned column */}
             <KanbanColumn
               columnId={UNASSIGNED}
@@ -312,12 +315,12 @@ export function KanbanBoard({
             ))}
 
             {/* Add agent button */}
-            {agentColumns.length < MAX_AGENTS && (
+            {agentColumns.length < effectiveMaxAgents && (
               <button
                 onClick={handleAddAgent}
-                className="flex w-[300px] shrink-0 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-800 bg-zinc-900/20 text-zinc-600 hover:text-zinc-400 hover:border-zinc-700 transition-colors min-h-[300px]"
+                className="flex w-[280px] shrink-0 items-center justify-center gap-2 rounded-lg py-4 text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800/20 transition-colors self-start mt-8"
               >
-                <Plus className="size-5" />
+                <Plus className="size-4" />
                 <span className="text-xs">Add Agent</span>
               </button>
             )}
