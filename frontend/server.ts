@@ -64,6 +64,37 @@ app.prepare().then(() => {
       console.log(`[socket.io] ${socket.id} left session:${sessionId}`);
     });
 
+    socket.on("session:stop", (data: { sessionId: string }) => {
+      const { sessionId } = data;
+      const session = getSession(sessionId);
+      if (!session) return;
+
+      console.log(`[socket.io] Stopping session ${sessionId}`);
+
+      // Mark all agents as terminated
+      session.agents.forEach((agent) => {
+        updateAgentStatus(sessionId, agent.id, "terminated");
+      });
+
+      // Tell all workers to stop
+      io.to(`session:${sessionId}`).emit("task:none");
+
+      // Notify browser clients
+      session.agents.forEach((agent) => {
+        io.to(`session:${sessionId}`).emit("agent:terminated", {
+          agentId: agent.id,
+        });
+      });
+
+      // Mark session as failed (user-stopped)
+      session.status = "failed";
+      persistSessionStatus(sessionId, "failed", new Date()).catch(
+        console.error
+      );
+
+      console.log(`[server] Session ${sessionId} stopped by user`);
+    });
+
     // --- Worker events ---
 
     socket.on("agent:join", (data: AgentJoinEvent) => {
