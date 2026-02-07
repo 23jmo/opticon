@@ -2,7 +2,7 @@
 
 ## Overview
 
-Panopticon is a web platform where users submit natural language prompts (e.g., "Research AI agents and create a Google Doc summarizing your findings"). An orchestrator decomposes the prompt into independent tasks, the user reviews and approves the task breakdown, then multiple AI agents each boot their own cloud Linux desktop and execute tasks in parallel. Live desktop streams, agent reasoning, and a shared whiteboard are all visible in the browser.
+Panopticon is a web platform where users submit natural language prompts (e.g., "Research AI agents and create a Google Doc summarizing your findings"). An orchestrator decomposes the prompt into independent tasks, the user reviews and approves the task breakdown, then multiple AI agents each boot their own cloud Linux desktop and execute tasks in parallel. Live desktop streams, agent reasoning, and a read-only shared whiteboard are all visible in the browser.
 
 Built as a polished demo. Reliability and visual quality over feature breadth.
 
@@ -18,9 +18,8 @@ Built as a polished demo. Reliability and visual quality over feature breadth.
 │  │                         │                                │   │
 │  │   Desktop Stream        │   Thinking Panel (sidebar)     │   │
 │  │   (noVNC / E2B stream)  │   - Grouped by LLM reasoning  │   │
-│  │                         │   - Expandable tool calls      │   │
-│  │   [Full user control]   │   - Per-agent (tab-scoped)     │   │
-│  │   [Pause/Resume agent]  │                                │   │
+│  │   (view-only)           │   - Expandable tool calls      │   │
+│  │                         │   - Per-agent (tab-scoped)     │   │
 │  │                         │                                │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │                       Socket.io                                 │
@@ -33,7 +32,7 @@ Built as a polished demo. Reliability and visual quality over feature breadth.
 │  │ Orchestrator │   │     In-Memory Session Store             │   │
 │  │ (Dedalus     │──▶│  - Task list with status                │   │
 │  │  chat.compl.)│   │  - Agent state                          │   │
-│  │ Decomposes   │   │  - Shared whiteboard (markdown)         │   │
+│  │ Decomposes   │   │  - Shared whiteboard (read-only)         │   │
 │  │ prompt       │   │  - Push model (backend assigns tasks)   │   │
 │  └─────────────┘   └────────────────────────────────────────┘   │
 │                              │                                  │
@@ -82,16 +81,12 @@ After the orchestrator decomposes the prompt:
 
 **Tab bar:**
 - One tab per agent + one "Whiteboard" tab
-- Each agent tab shows a status dot: green (active), yellow (paused), red (failed), gray (terminated)
+- Each agent tab shows a status dot: green (active), red (failed), gray (terminated)
 - Each agent tab shows task progress: "Task 2/3"
 
 **Desktop stream (center):**
 - E2B's built-in noVNC streaming, scaled to fit the browser viewport
-- Full user control: users can click and type directly into the VNC canvas
-- When user clicks into the stream, the agent auto-pauses
-- "Resume" button hands control back to the agent
-- On resume, agent takes a fresh screenshot and reassesses (adapts to user changes)
-- During pause, thinking panel shows "Paused — User in control" (no granular user action logging)
+- View-only: users watch agents work but cannot interact with the desktop
 
 **Thinking panel (right sidebar, per-agent):**
 - Grouped by LLM reasoning: each turn's reasoning text is the step label
@@ -101,9 +96,9 @@ After the orchestrator decomposes the prompt:
 
 **Whiteboard tab:**
 - Separate tab alongside agent tabs
-- Markdown editor with preview
+- Read-only markdown view (rendered, not editable)
+- Agents write to the whiteboard to share findings and coordination notes
 - Agents read whiteboard content between tasks (not mid-task)
-- User can edit at any time to leave instructions for agents
 - Freeform — no structured sections
 
 #### Boot Sequence
@@ -166,9 +161,10 @@ While agents spin up sandboxes (10–30 seconds):
 
 - Freeform markdown text shared across all agents in a session
 - Stored in the backend's in-memory session store
+- Agents write to the whiteboard to post findings, notes, and coordination signals
 - Agents read the whiteboard at task boundaries (between tasks, not mid-task)
-- Users can read and edit the whiteboard at any time via the frontend Whiteboard tab
-- Use case: user leaves instructions ("Use Firefox, not Chrome"), agents share findings ("Found the data at URL X"), coordination notes
+- Read-only in the frontend — users can observe agent coordination but not edit
+- Use case: agents share findings ("Found the data at URL X"), post intermediate results, coordinate handoffs
 
 ### 5. E2B Desktop Sandboxes
 
@@ -206,9 +202,7 @@ While agents spin up sandboxes (10–30 seconds):
 | `agent:terminated` | Worker → Server | `{ agentId }` |
 | `task:created` | Server → Client | `{ todo }` |
 | `task:assigned` | Server → Client | `{ todoId, agentId }` |
-| `agent:paused` | Client → Server | `{ agentId }` |
-| `agent:resumed` | Client → Server | `{ agentId }` |
-| `whiteboard:updated` | Client → Server | `{ sessionId, content }` |
+| `whiteboard:updated` | Worker → Server | `{ sessionId, content }` |
 | `session:complete` | Server → Client | `{ sessionId }` |
 
 ### 7. API Routes
@@ -218,8 +212,7 @@ While agents spin up sandboxes (10–30 seconds):
 | `POST` | `/api/sessions` | Submit prompt + agent count. Returns proposed task list. |
 | `POST` | `/api/sessions/:id/approve` | User approves (optionally edited) task list + agent count. Spawns workers. |
 | `GET` | `/api/sessions/:id` | Get session state (tasks, agents, status). |
-| `PUT` | `/api/sessions/:id/whiteboard` | Update whiteboard content. |
-| `GET` | `/api/sessions/:id/whiteboard` | Get current whiteboard content. |
+| `GET` | `/api/sessions/:id/whiteboard` | Get current whiteboard content (read-only). |
 
 ### 8. API Keys & Auth
 
