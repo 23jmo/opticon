@@ -272,9 +272,9 @@ export function KanbanBoard({
   );
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col">
       {/* Board */}
-      <div className="flex-1 overflow-x-auto px-6 py-4">
+      <div className="overflow-x-auto px-6 py-4">
         <DndContext
           sensors={sensors}
           collisionDetection={closestCorners}
@@ -282,7 +282,7 @@ export function KanbanBoard({
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
         >
-          <div className="flex gap-4 h-full">
+          <div className="flex gap-4">
             {/* Unassigned column */}
             <KanbanColumn
               columnId={UNASSIGNED}
@@ -315,7 +315,7 @@ export function KanbanBoard({
             {agentColumns.length < MAX_AGENTS && (
               <button
                 onClick={handleAddAgent}
-                className="flex w-[300px] shrink-0 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-800 bg-zinc-900/20 text-zinc-600 hover:text-zinc-400 hover:border-zinc-700 transition-colors"
+                className="flex w-[300px] shrink-0 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-800 bg-zinc-900/20 text-zinc-600 hover:text-zinc-400 hover:border-zinc-700 transition-colors min-h-[300px]"
               >
                 <Plus className="size-5" />
                 <span className="text-xs">Add Agent</span>

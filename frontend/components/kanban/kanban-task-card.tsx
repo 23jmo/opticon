@@ -2,7 +2,7 @@
 
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import type { Todo } from "@/lib/types";
 
 interface KanbanTaskCardProps {
@@ -36,28 +36,43 @@ export function KanbanTaskCard({
     <div
       ref={setNodeRef}
       style={style}
-      className={`group flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2.5 ${
+      {...attributes}
+      {...listeners}
+      className={`group flex items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2.5 cursor-grab active:cursor-grabbing ${
         isDragging ? "ring-2 ring-primary/30 opacity-80" : ""
       } ${overlay ? "shadow-xl shadow-black/40 ring-2 ring-primary/30" : ""}`}
     >
-      <button
-        {...attributes}
-        {...listeners}
-        className="mt-1.5 cursor-grab text-zinc-700 hover:text-zinc-500 active:cursor-grabbing shrink-0 touch-none"
-        tabIndex={-1}
-      >
-        <GripVertical className="size-3.5" />
-      </button>
+      {/* Checkbox */}
+      <div className="mt-1 shrink-0">
+        <div className="size-4 rounded-full border-2 border-zinc-700 bg-zinc-900/40" />
+      </div>
+
+      {/* Task text */}
       <textarea
         value={task.description}
         onChange={(e) => onUpdate(e.target.value)}
-        className="flex-1 bg-transparent text-sm text-zinc-200 resize-none outline-none placeholder:text-zinc-600 min-h-[36px] leading-relaxed"
+        onMouseDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+        className="flex-1 bg-transparent text-sm text-zinc-200 resize-none outline-none placeholder:text-zinc-600 leading-relaxed"
         placeholder="Describe the task..."
-        rows={2}
+        rows={1}
+        style={{ height: 'auto', minHeight: '20px' }}
+        onInput={(e) => {
+          const target = e.target as HTMLTextAreaElement;
+          target.style.height = 'auto';
+          target.style.height = target.scrollHeight + 'px';
+        }}
       />
+
+      {/* Delete button */}
       <button
-        onClick={onRemove}
-        className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-destructive transition-all mt-1.5 shrink-0"
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove();
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+        className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-destructive transition-all mt-1 shrink-0"
       >
         <Trash2 className="size-3.5" />
       </button>

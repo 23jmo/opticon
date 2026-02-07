@@ -46,10 +46,19 @@ export function addTodos(sessionId: string, descriptions: string[]): Todo[] {
   return newTodos;
 }
 
-export function updateTodos(sessionId: string, todos: Todo[]): void {
+export function updateTodos(sessionId: string, descriptions: string[]): Todo[] {
   const session = sessions.get(sessionId);
   if (!session) throw new Error(`Session ${sessionId} not found`);
-  session.todos = todos;
+
+  const newTodos: Todo[] = descriptions.map((description) => ({
+    id: uuidv4(),
+    description,
+    status: "pending" as const,
+    assignedTo: null,
+  }));
+
+  session.todos = newTodos;
+  return newTodos;
 }
 
 export function approveSession(sessionId: string): void {

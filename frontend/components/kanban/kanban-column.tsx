@@ -79,20 +79,22 @@ export function KanbanColumn({
       </div>
 
       {/* Task list */}
-      <div ref={setNodeRef} className="flex-1 p-2 space-y-2 min-h-[100px]">
-        <SortableContext
-          items={tasks.map((t) => t.id)}
-          strategy={verticalListSortingStrategy}
-        >
-          {tasks.map((task) => (
-            <KanbanTaskCard
-              key={task.id}
-              task={task}
-              onUpdate={(desc) => onUpdateTask(task.id, desc)}
-              onRemove={() => onRemoveTask(task.id)}
-            />
-          ))}
-        </SortableContext>
+      <div className="flex-1 p-2 space-y-2 min-h-[200px] flex flex-col">
+        <div ref={setNodeRef} className="flex-1 space-y-2 min-h-[150px]">
+          <SortableContext
+            items={tasks.map((t) => t.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            {tasks.map((task) => (
+              <KanbanTaskCard
+                key={task.id}
+                task={task}
+                onUpdate={(desc) => onUpdateTask(task.id, desc)}
+                onRemove={() => onRemoveTask(task.id)}
+              />
+            ))}
+          </SortableContext>
+        </div>
 
         {/* Add task button */}
         <button
