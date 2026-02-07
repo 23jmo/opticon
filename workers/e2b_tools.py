@@ -1,5 +1,4 @@
 import base64
-import json
 
 _sandbox = None
 
@@ -12,8 +11,8 @@ def init(sandbox):
 
 # --- Tool functions (called by the agentic loop) ---
 
-def take_screenshot() -> str:
-    """Take a screenshot of the current desktop. Returns base64-encoded PNG."""
+def screenshot_as_base64() -> str:
+    """Take a screenshot and return base64-encoded PNG."""
     img_bytes = _sandbox.screenshot()
     return base64.b64encode(img_bytes).decode("utf-8")
 
@@ -56,21 +55,12 @@ TOOL_FUNCTIONS = {
     "type_text": type_text,
     "press_key": press_key,
     "move_mouse": move_mouse,
-    # take_screenshot is NOT here — it's handled specially in the loop
-    # (result is injected as an image, not text)
 }
 
 # --- OpenAI-compatible tool schemas for chat.completions.create() ---
+# No take_screenshot — screenshots are injected automatically as user messages.
 
 TOOL_SCHEMAS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "take_screenshot",
-            "description": "Take a screenshot of the current desktop to see what is on screen.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
     {
         "type": "function",
         "function": {
@@ -144,13 +134,27 @@ TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "done",
+            "description": "Call this when the task is complete. Provide a summary of what you accomplished.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string", "description": "Summary of what was accomplished"},
+                },
+                "required": ["summary"],
+            },
+        },
+    },
 ]
 
 
 def execute_tool(name, arguments):
     """Execute a tool by name with the given arguments dict. Returns result string."""
-    if name == "take_screenshot":
-        return take_screenshot()
+    if name == "done":
+        return arguments.get("summary", "Task complete")
     func = TOOL_FUNCTIONS.get(name)
     if not func:
         return f"Unknown tool: {name}"

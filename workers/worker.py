@@ -14,41 +14,68 @@ import e2b_tools
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
-    "You are an AI agent controlling a Linux desktop via tools. "
-    "You can take screenshots to see the screen, then click, type, or press keys to interact. "
-    "Always call take_screenshot first to see what's on screen before acting. "
-    "After each action, take another screenshot to verify the result. "
-    "When your task is complete, respond with a text summary of what you accomplished — do NOT call any more tools."
+    "You are an AI agent controlling a Linux desktop. "
+    "You will be shown a screenshot of the current screen before each turn. "
+    "Look at the screenshot carefully, then use one of the available tools "
+    "(click, double_click, type_text, press_key, move_mouse) to interact with the desktop. "
+    "You can only use ONE tool per turn. After your action, you'll receive a new screenshot. "
+    "When the task is complete, call the 'done' tool with a summary."
 )
 
 MODEL = "anthropic/claude-sonnet-4-5-20250929"
 MAX_STEPS = 50
 
 
-async def run_agent_loop(client, messages, on_step=None):
-    """
-    Custom observe-think-act loop using Dedalus chat.completions.create().
+def make_screenshot_message():
+    """Capture the desktop and return a user message with the image."""
+    b64 = e2b_tools.screenshot_as_base64()
+    return {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Here is the current screenshot of the desktop:"},
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/png;base64,{b64}",
+                    "detail": "high",
+                },
+            },
+            {"type": "text", "text": "What action should you take next?"},
+        ],
+    }
 
-    Screenshots are injected as image_url content blocks so the model
-    actually sees the desktop. Other tool results are injected as text.
 
-    Returns the final text response from the model.
+async def run_agent_loop(client, task_description, on_step=None):
     """
+    Observe-think-act loop using Dedalus chat.completions.create().
+
+    Each turn:
+      1. Take a screenshot → inject as a user message (image_url)
+      2. Model sees the desktop and returns a tool call
+      3. Execute the tool, loop back to 1
+
+    Returns the final summary when the model calls 'done'.
+    """
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": f"Your task: {task_description}"},
+    ]
+
     for step in range(MAX_STEPS):
+        # Observe: take screenshot and show it to the model
+        messages.append(make_screenshot_message())
+
         response = await client.chat.completions.create(
             model=MODEL,
             messages=messages,
             tools=e2b_tools.TOOL_SCHEMAS,
+            tool_choice={"type": "any"},
         )
 
         choice = response.choices[0]
         msg = choice.message
 
-        # If the model responded with text and no tool calls, we're done
-        if not msg.tool_calls:
-            return msg.content or "(no response)"
-
-        # Append the assistant message (with tool_calls) to history
+        # Append assistant response to history
         messages.append(msg.to_dict() if hasattr(msg, "to_dict") else {
             "role": "assistant",
             "content": msg.content,
@@ -58,45 +85,33 @@ async def run_agent_loop(client, messages, on_step=None):
                     "type": "function",
                     "function": {"name": tc.function.name, "arguments": tc.function.arguments},
                 }
-                for tc in msg.tool_calls
+                for tc in (msg.tool_calls or [])
             ],
         })
 
-        # Execute each tool call and append results
-        for tc in msg.tool_calls:
-            name = tc.function.name
-            try:
-                args = json.loads(tc.function.arguments)
-            except json.JSONDecodeError:
-                args = {}
+        if not msg.tool_calls:
+            return msg.content or "(no response)"
 
-            if on_step:
-                await on_step(step + 1, name, args)
+        # Execute the first tool call (one action per turn)
+        tc = msg.tool_calls[0]
+        name = tc.function.name
+        try:
+            args = json.loads(tc.function.arguments)
+        except json.JSONDecodeError:
+            args = {}
 
-            result = e2b_tools.execute_tool(name, args)
+        if on_step:
+            await on_step(step + 1, name, args)
 
-            if name == "take_screenshot":
-                # Inject screenshot as an image the model can SEE
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": [
-                        {"type": "text", "text": "Here is the current screenshot:"},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,{result}",
-                                "detail": "high",
-                            },
-                        },
-                    ],
-                })
-            else:
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": result,
-                })
+        result = e2b_tools.execute_tool(name, args)
+
+        # If done, return the summary
+        if name == "done":
+            messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+            return result
+
+        # Append tool result and continue
+        messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
 
     return "(max steps reached)"
 
@@ -177,11 +192,9 @@ async def main():
                     })
 
                 try:
-                    messages = [
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": f"Complete this task: {task['description']}"},
-                    ]
-                    result = await run_agent_loop(client, messages, on_step=on_step)
+                    result = await run_agent_loop(
+                        client, task["description"], on_step=on_step
+                    )
                 except Exception as e:
                     result = f"Error: {e}"
                     await emit(
