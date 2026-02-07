@@ -154,6 +154,10 @@ async def main():
     async def on_task_none(data=None):
         terminated.set()
 
+    @sio.on("session:complete")
+    async def on_session_complete(data=None):
+        terminated.set()
+
     # --- Boot E2B sandbox ---
     desktop = None
     try:

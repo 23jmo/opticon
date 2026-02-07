@@ -103,7 +103,8 @@ app.prepare().then(() => {
           description: nextTask.description,
           whiteboard,
         });
-      } else {
+      } else if (isSessionFullyComplete(sessionId)) {
+        // Only terminate if all tasks are done; otherwise agent idles
         socket.emit("task:none");
       }
     });
@@ -171,9 +172,12 @@ app.prepare().then(() => {
           description: nextTask.description,
           whiteboard,
         });
-      } else {
-        socket.emit("task:none");
+      } else if (isSessionFullyComplete(sessionId)) {
+        // All tasks done — broadcast task:none to terminate all idle workers
+        const room = `session:${sessionId}`;
+        io.to(room).emit("task:none");
       }
+      // Otherwise: no pending tasks but session not complete — agent idles
     });
 
     socket.on("whiteboard:updated", (data: WhiteboardUpdatedEvent) => {
@@ -229,6 +233,12 @@ function findSessionId(socket: { rooms: Set<string> }): string | null {
     }
   }
   return null;
+}
+
+function isSessionFullyComplete(sessionId: string): boolean {
+  const session = getSession(sessionId);
+  if (!session) return true;
+  return session.todos.length > 0 && session.todos.every((t) => t.status === "completed");
 }
 
 function checkSessionComplete(sessionId: string): void {
