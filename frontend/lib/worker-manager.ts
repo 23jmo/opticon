@@ -16,7 +16,8 @@ import type { Agent } from "./types";
 // Track worker processes per session
 const workerProcesses = new Map<string, Map<string, ChildProcess>>();
 
-const PROJECT_ROOT = path.resolve(__dirname, "../..");
+// process.cwd() returns frontend/ in Next.js dev; go up one level to project root
+const PROJECT_ROOT = path.resolve(process.cwd(), "..");
 
 export function spawnWorkers(sessionId: string, agentCount: number): void {
   const session = getSession(sessionId);
@@ -55,7 +56,8 @@ export function spawnWorkers(sessionId: string, agentCount: number): void {
       console.warn("[worker-manager] Socket.io not available, skipping emit");
     }
 
-    const workerProcess = spawn("python3", ["workers/worker.py"], {
+    const pythonPath = process.env.PYTHON_PATH || "python3";
+    const workerProcess = spawn(pythonPath, ["workers/worker.py"], {
       cwd: PROJECT_ROOT,
       env: {
         ...process.env,
