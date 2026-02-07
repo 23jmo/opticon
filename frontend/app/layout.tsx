@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Figtree, Fira_Mono } from "next/font/google";
 import { SessionProvider } from "next-auth/react";
+import { FlowgladProvider } from "@flowglad/nextjs";
 import "./globals.css";
 
 const figtree = Figtree({
@@ -30,7 +31,9 @@ export default function RootLayout({
       <body
         className={`${figtree.variable} ${firaMono.variable} antialiased`}
       >
-        <SessionProvider>{children}</SessionProvider>
+        <SessionProvider>
+          <FlowgladProvider>{children}</FlowgladProvider>
+        </SessionProvider>
       </body>
     </html>
   );

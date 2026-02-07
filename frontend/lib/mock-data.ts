@@ -12,10 +12,10 @@ export const MOCK_PROMPT =
   "Write a comprehensive research paper on Google Docs about the rise of Daedalus Labs and their impact on AI agent development, including market analysis and technical architecture review";
 
 export const MOCK_AGENTS: Agent[] = [
-  { id: "agent-001", sessionId: "demo", status: "active", currentTaskId: null },
-  { id: "agent-002", sessionId: "demo", status: "active", currentTaskId: null },
-  { id: "agent-003", sessionId: "demo", status: "active", currentTaskId: null },
-  { id: "agent-004", sessionId: "demo", status: "booting", currentTaskId: null },
+  { id: "agent-001", name: "Agent 1", sessionId: "demo", status: "active", currentTaskId: null },
+  { id: "agent-002", name: "Agent 2", sessionId: "demo", status: "active", currentTaskId: null },
+  { id: "agent-003", name: "Agent 3", sessionId: "demo", status: "active", currentTaskId: null },
+  { id: "agent-004", name: "Agent 4", sessionId: "demo", status: "booting", currentTaskId: null },
 ];
 
 export const MOCK_AGENT_ACTIVITIES: Record<string, AgentActivity> = {

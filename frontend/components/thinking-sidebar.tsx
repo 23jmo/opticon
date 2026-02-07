@@ -133,7 +133,7 @@ export function ThinkingSidebar({
                       : "text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  {activity?.label || getAgentNumber(agent.id)}
+                  {activity?.label || agent.name}
                 </button>
               );
             })}

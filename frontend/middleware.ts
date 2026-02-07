@@ -9,9 +9,11 @@ export default auth((req) => {
   const isPublic =
     pathname.startsWith("/auth/") ||
     pathname.startsWith("/api/auth/") ||
+    pathname.startsWith("/api/flowglad/") ||
     pathname.startsWith("/session/demo") ||
     pathname.startsWith("/_next/") ||
     pathname.startsWith("/favicon") ||
+    pathname === "/pricing" ||
     pathname === "/api/health";
 
   if (isPublic) return;

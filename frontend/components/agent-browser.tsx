@@ -5,7 +5,7 @@ import { Agent } from "@/lib/types";
 import { AgentActivity } from "@/lib/mock-data";
 import { AgentScreen } from "./agent-screen";
 import { VMTab } from "./vm-tab";
-import { Send, Ellipsis, X, Mouse, Eye } from "lucide-react";
+import { Send, Ellipsis, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -29,10 +29,8 @@ export function AgentBrowser({
   whiteboard,
   onAgentCommand,
 }: AgentBrowserProps) {
-  const [isInteractive, setIsInteractive] = useState(false);
   const isMock = sessionId === "demo";
   const isWhiteboardTab = activeAgentId === "__whiteboard__";
-  const activeAgent = agents.find((a) => a.id === activeAgentId);
   const [chatInput, setChatInput] = useState("");
 
   const handleSendCommand = () => {
@@ -67,7 +65,7 @@ export function AgentBrowser({
 
               {/* Agent name */}
               <span className="truncate font-medium">
-                {agent.id}
+                {agent.name}
               </span>
 
               {/* Menu + close */}
@@ -104,29 +102,6 @@ export function AgentBrowser({
           </button>
         )}
 
-        {/* Spacer to push interactive toggle to the right */}
-        <div className="flex-1" />
-
-        {/* Interactive mode toggle */}
-        {!isWhiteboardTab && !isMock && activeAgent?.streamUrl && (
-          <button
-            onClick={() => setIsInteractive((prev) => !prev)}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-2.5 text-[11px] font-medium transition-all shrink-0 self-center mr-2",
-              isInteractive
-                ? "text-primary"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-            title={isInteractive ? "Switch to view-only" : "Take control of desktop"}
-          >
-            {isInteractive ? (
-              <Mouse className="size-3" />
-            ) : (
-              <Eye className="size-3" />
-            )}
-            {isInteractive ? "Control" : "View only"}
-          </button>
-        )}
       </div>
 
       {/* Screen content */}
@@ -162,7 +137,6 @@ export function AgentBrowser({
               sessionId={sessionId || ""}
               streamUrl={agent.streamUrl}
               isActive={isActive}
-              isInteractive={isActive && isInteractive}
             />
           );
         })}

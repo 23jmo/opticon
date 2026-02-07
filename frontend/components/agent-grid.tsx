@@ -85,7 +85,7 @@ function AgentGridCell({
             )}
           />
           <span className="text-[10px] font-medium text-white">
-            {activity?.label || `Agent ${agent.id.slice(0, 6)}`}
+            {activity?.label || agent.name}
           </span>
         </div>
         <div className="h-full group-hover:opacity-90 transition-opacity">

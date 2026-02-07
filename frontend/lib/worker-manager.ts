@@ -25,6 +25,7 @@ export function spawnWorkers(sessionId: string, agentCount: number): void {
     const agentId = uuidv4();
     const agent: Agent = {
       id: agentId,
+      name: `Agent ${i + 1}`,
       sessionId,
       status: "booting",
       currentTaskId: null,
