@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import Dedalus from "dedalus-labs";
 import { DedalusRunner } from "dedalus-labs";
 import { createSession, addTodos, getSession } from "@/lib/session-store";
+import { auth } from "@/auth";
 
 let runner: DedalusRunner | null = null;
 
@@ -15,6 +16,11 @@ function getRunner(): DedalusRunner {
 }
 
 export async function POST(request: Request) {
+  const authSession = await auth();
+  if (!authSession?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const body = await request.json();
   const { prompt, agentCount } = body as {
     prompt: string;
@@ -38,7 +44,7 @@ export async function POST(request: Request) {
   }
 
   const sessionId = uuidv4();
-  createSession(sessionId, prompt.trim(), agentCount);
+  createSession(sessionId, prompt.trim(), agentCount, authSession.user.id);
 
   // Decompose prompt into TODOs via Dedalus
   let todoDescriptions: string[];
@@ -67,8 +73,8 @@ Rules:
     );
   } catch (error) {
     console.error("[orchestrator] Failed to decompose prompt:", error);
-    const session = getSession(sessionId);
-    if (session) session.status = "failed";
+    const failedSession = getSession(sessionId);
+    if (failedSession) failedSession.status = "failed";
     return NextResponse.json(
       { error: "Failed to decompose prompt" },
       { status: 500 },
@@ -79,8 +85,8 @@ Rules:
   const todos = addTodos(sessionId, todoDescriptions);
 
   // Set session to pending_approval so the user can review tasks
-  const session = getSession(sessionId);
-  if (session) session.status = "pending_approval";
+  const panopticonSession = getSession(sessionId);
+  if (panopticonSession) panopticonSession.status = "pending_approval";
 
   return NextResponse.json({ sessionId, tasks: todos }, { status: 201 });
 }

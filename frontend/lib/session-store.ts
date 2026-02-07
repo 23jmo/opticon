@@ -9,7 +9,8 @@ const sessions = (globalStore.__panopticon_sessions ??= new Map<string, Session>
 export function createSession(
   id: string,
   prompt: string,
-  agentCount: number
+  agentCount: number,
+  userId?: string
 ): Session {
   const session: Session = {
     id,
@@ -20,6 +21,7 @@ export function createSession(
     agents: [],
     createdAt: Date.now(),
     whiteboard: "",
+    userId,
   };
   sessions.set(id, session);
   return session;

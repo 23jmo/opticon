@@ -41,6 +41,7 @@ export interface Session {
   agents: Agent[];
   createdAt: number;
   whiteboard?: string;
+  userId?: string;
 }
 
 // Socket.io event payload types

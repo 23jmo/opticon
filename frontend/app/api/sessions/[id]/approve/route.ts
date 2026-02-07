@@ -8,16 +8,26 @@ import {
 import { getIO } from "@/lib/socket";
 import { spawnWorkers } from "@/lib/worker-manager";
 import type { Todo } from "@/lib/types";
+import { auth } from "@/auth";
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authSession = await auth();
+  if (!authSession?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { id: sessionId } = await params;
   const session = getSession(sessionId);
 
   if (!session) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  }
+
+  if (session.userId && session.userId !== authSession.user.id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   if (session.status !== "pending_approval") {
