@@ -21,10 +21,8 @@ export function VMTab({ agentId, streamUrl, isActive }: VMTabProps) {
     }
   }, [streamUrl]);
 
-  if (!isActive) return null;
-
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div className={`flex h-full flex-col bg-background absolute inset-0 ${isActive ? "visible z-10" : "invisible z-0"}`}>
       {/* Stream content */}
       <div className="relative flex-1">
         {!streamUrl ? (

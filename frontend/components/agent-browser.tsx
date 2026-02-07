@@ -132,23 +132,41 @@ export function AgentBrowser({
       </div>
 
       {/* Screen content */}
-      <div className="flex-1 overflow-hidden bg-background">
-        {isWhiteboardTab ? (
-          <WhiteboardView content={whiteboard || ""} />
-        ) : isMock || !activeAgent?.streamUrl ? (
-          <AgentScreen
-            agentId={activeAgentId}
-            activity={activity!}
-            status={activeAgent?.status || "booting"}
-          />
-        ) : (
-          <VMTab
-            agentId={activeAgentId}
-            sessionId={sessionId || ""}
-            streamUrl={activeAgent.streamUrl}
-            isActive={true}
-          />
+      <div className="flex-1 overflow-hidden bg-background relative">
+        {/* Whiteboard tab */}
+        {whiteboard !== undefined && (
+          <div className={`absolute inset-0 ${isWhiteboardTab ? "visible z-10" : "invisible z-0"}`}>
+            <WhiteboardView content={whiteboard || ""} />
+          </div>
         )}
+
+        {/* Agent tabs — all rendered to keep iframes alive across tab switches */}
+        {agents.map((agent) => {
+          const isActive = agent.id === activeAgentId && !isWhiteboardTab;
+          const agentActivity = agentActivities[agent.id];
+
+          if (isMock || !agent.streamUrl) {
+            return isActive ? (
+              <div key={agent.id} className="absolute inset-0 z-10">
+                <AgentScreen
+                  agentId={agent.id}
+                  activity={agentActivity}
+                  status={agent.status || "booting"}
+                />
+              </div>
+            ) : null;
+          }
+
+          return (
+            <VMTab
+              key={agent.id}
+              agentId={agent.id}
+              sessionId={sessionId || ""}
+              streamUrl={agent.streamUrl}
+              isActive={isActive}
+            />
+          );
+        })}
       </div>
     </div>
   );
