@@ -2,16 +2,19 @@ import { NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 import Dedalus from "dedalus-labs";
 import { DedalusRunner } from "dedalus-labs";
-import {
-  createSession,
-  addTodos,
-  getSession,
-} from "@/lib/session-store";
+import { createSession, addTodos, getSession } from "@/lib/session-store";
 import { getIO } from "@/lib/socket";
 import { spawnWorkers } from "@/lib/worker-manager";
 
-const client = new Dedalus();
-const runner = new DedalusRunner(client);
+let runner: DedalusRunner | null = null;
+
+function getRunner(): DedalusRunner {
+  if (!runner) {
+    const client = new Dedalus({ apiKey: process.env.DEDALUS_API_KEY });
+    runner = new DedalusRunner(client);
+  }
+  return runner;
+}
 
 export async function POST(request: Request) {
   const body = await request.json();
@@ -32,7 +35,7 @@ export async function POST(request: Request) {
   ) {
     return NextResponse.json(
       { error: "agentCount must be between 1 and 4" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -42,7 +45,7 @@ export async function POST(request: Request) {
   // Decompose prompt into TODOs via Dedalus
   let todoDescriptions: string[];
   try {
-    const response = await runner.run({
+    const response = await getRunner().run({
       input: prompt.trim(),
       model: "anthropic/claude-sonnet-4-5-20250929",
       instructions: `You are a task decomposition engine. Given a user's prompt, break it down into independent, parallelizable tasks that can each be executed by an AI agent controlling a cloud desktop (browser, file system, etc).
@@ -56,9 +59,13 @@ Rules:
       max_tokens: 1024,
     });
 
-    const parsed = JSON.parse(response.finalOutput);
+    const raw = response.finalOutput
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/```\s*$/, "")
+      .trim();
+    const parsed = JSON.parse(raw);
     todoDescriptions = parsed.todos.map(
-      (t: { description: string }) => t.description
+      (t: { description: string }) => t.description,
     );
   } catch (error) {
     console.error("[orchestrator] Failed to decompose prompt:", error);
@@ -66,7 +73,7 @@ Rules:
     if (session) session.status = "failed";
     return NextResponse.json(
       { error: "Failed to decompose prompt" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 
