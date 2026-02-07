@@ -8,9 +8,10 @@ interface VMTabProps {
   sessionId: string;
   streamUrl?: string;
   isActive: boolean;
+  isInteractive?: boolean;
 }
 
-export function VMTab({ agentId, streamUrl, isActive }: VMTabProps) {
+export function VMTab({ agentId, streamUrl, isActive, isInteractive }: VMTabProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [streamError, setStreamError] = useState<string | null>(null);
 
@@ -64,10 +65,12 @@ export function VMTab({ agentId, streamUrl, isActive }: VMTabProps) {
               </div>
             )}
             {/* View-only overlay to prevent interaction */}
-            <div className="absolute inset-0 z-20 pointer-events-auto" style={{ pointerEvents: "none" }} />
+            {!isInteractive && (
+              <div className="absolute inset-0 z-20" style={{ pointerEvents: "auto" }} />
+            )}
             <iframe
               src={streamUrl}
-              className="h-full w-full border-0 pointer-events-none"
+              className={`h-full w-full border-0 ${isInteractive ? "" : "pointer-events-none"}`}
               allow="clipboard-read; clipboard-write"
               onLoad={() => {
                 setIsLoading(false);

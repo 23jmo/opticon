@@ -173,9 +173,11 @@ app.prepare().then(() => {
           whiteboard,
         });
       } else if (isSessionFullyComplete(sessionId)) {
-        // All tasks done — broadcast task:none to terminate all idle workers
+        // All tasks done — notify browser and terminate all idle workers
         const room = `session:${sessionId}`;
+        io.to(room).emit("session:complete", { sessionId });
         io.to(room).emit("task:none");
+        console.log(`[server] Session ${sessionId} — all tasks completed`);
       }
       // Otherwise: no pending tasks but session not complete — agent idles
     });

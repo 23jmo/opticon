@@ -1,10 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import { Agent } from "@/lib/types";
 import { AgentActivity } from "@/lib/mock-data";
 import { AgentScreen } from "./agent-screen";
 import { VMTab } from "./vm-tab";
-import { ChevronLeft, ChevronRight, RotateCw, Lock } from "lucide-react";
+import { ChevronLeft, ChevronRight, RotateCw, Lock, Mouse, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface AgentBrowserProps {
@@ -24,6 +25,7 @@ export function AgentBrowser({
   sessionId,
   whiteboard,
 }: AgentBrowserProps) {
+  const [isInteractive, setIsInteractive] = useState(false);
   const isMock = sessionId === "demo";
   const isWhiteboardTab = activeAgentId === "__whiteboard__";
   const activity = !isWhiteboardTab ? agentActivities[activeAgentId] : undefined;
@@ -129,6 +131,27 @@ export function AgentBrowser({
             </span>
           )}
         </div>
+
+        {/* Interactive mode toggle */}
+        {!isWhiteboardTab && !isMock && activeAgent?.streamUrl && (
+          <button
+            onClick={() => setIsInteractive((prev) => !prev)}
+            className={cn(
+              "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-all shrink-0",
+              isInteractive
+                ? "bg-primary/15 text-primary border border-primary/30"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/80"
+            )}
+            title={isInteractive ? "Switch to view-only" : "Take control of desktop"}
+          >
+            {isInteractive ? (
+              <Mouse className="size-3" />
+            ) : (
+              <Eye className="size-3" />
+            )}
+            {isInteractive ? "Control" : "View only"}
+          </button>
+        )}
       </div>
 
       {/* Screen content */}
@@ -164,6 +187,7 @@ export function AgentBrowser({
               sessionId={sessionId || ""}
               streamUrl={agent.streamUrl}
               isActive={isActive}
+              isInteractive={isActive && isInteractive}
             />
           );
         })}
