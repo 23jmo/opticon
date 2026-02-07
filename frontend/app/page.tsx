@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
 
 export default function Home() {
@@ -64,17 +63,6 @@ export default function Home() {
 
       <main className="relative z-10 w-full max-w-2xl px-6">
         <div className="space-y-8">
-          {/* Status badge */}
-          <div className="flex justify-center">
-            <Badge
-              variant="outline"
-              className="gap-2 border-zinc-800 bg-zinc-900/80 text-zinc-400 backdrop-blur-sm"
-            >
-              <span className="size-1.5 rounded-full bg-cyan-400 animate-pulse" />
-              Panopticon
-            </Badge>
-          </div>
-
           {/* Title */}
           <div className="text-center space-y-4">
             <h1 className="text-5xl sm:text-6xl font-bold tracking-tight text-gradient leading-[1.1]">

@@ -250,7 +250,7 @@ function SessionContent() {
         setThinkingEntries((prev) => [
           ...prev,
           {
-            id: `${data.agentId}-error-${Date.now()}`,
+            id: `${data.agentId}-error-${Date.now()}-${Math.random()}`,
             agentId: data.agentId,
             timestamp: new Date().toISOString(),
             action: `Error: ${data.error}`,
