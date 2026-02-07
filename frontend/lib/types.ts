@@ -26,6 +26,8 @@ export interface ThinkingEntry {
   timestamp: string;
   action: string;
   reasoning?: string;
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
   expanded?: boolean;
 }
 
@@ -65,4 +67,9 @@ export interface SessionCompleteEvent {
   sessionId: string;
   tasks: Task[];
   agents: Agent[];
+}
+
+export interface AgentCommandEvent {
+  agentId: string;
+  message: string;
 }

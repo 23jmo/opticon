@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, Suspense } from "react";
+import { useEffect, useState, useRef, Suspense, useCallback } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { Socket } from "socket.io-client";
 import {
@@ -23,6 +23,7 @@ import {
 } from "@/lib/mock-data";
 import { PromptBar } from "@/components/prompt-bar";
 import { AgentBrowser } from "@/components/agent-browser";
+import { AgentGrid } from "@/components/agent-grid";
 import { ThinkingSidebar } from "@/components/thinking-sidebar";
 import { Loader2 } from "lucide-react";
 
@@ -48,6 +49,34 @@ function SessionContent() {
   const [thinkingEntries, setThinkingEntries] = useState<ThinkingEntry[]>([]);
   const [isLoading, setIsLoading] = useState(!isMock);
   const [error, setError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"tabs" | "grid">("tabs");
+
+  const handleStop = useCallback(() => {
+    if (socketRef.current) {
+      socketRef.current.emit("session:stop", { sessionId });
+    }
+    // Update all agents to terminated
+    setAgents((prev) =>
+      prev.map((agent) => ({ ...agent, status: "terminated" as const }))
+    );
+  }, [sessionId]);
+
+  const handleAgentCommand = useCallback(
+    (agentId: string, message: string) => {
+      if (socketRef.current) {
+        socketRef.current.emit("agent:command", { agentId, message });
+      }
+    },
+    []
+  );
+
+  const handleGridSelectAgent = useCallback(
+    (agentId: string) => {
+      setActiveTab(agentId);
+      setViewMode("tabs");
+    },
+    []
+  );
 
   // Mock mode: simulate streaming thinking entries
   useEffect(() => {
@@ -60,7 +89,6 @@ function SessionContent() {
 
     const timers: NodeJS.Timeout[] = [];
     relevantEntries.forEach((entry, index) => {
-      // First few entries appear quickly, then slow to a realistic pace
       const delay =
         index < 4 ? 400 + index * 600 : 2800 + (index - 4) * 1800;
 
@@ -116,7 +144,6 @@ function SessionContent() {
       });
 
       socket.on("task:created", (data: TaskCreatedEvent) => {
-        // Tasks tracked separately if needed
         void data;
       });
 
@@ -276,22 +303,34 @@ function SessionContent() {
 
   return (
     <div className="flex h-screen flex-col">
-      {/* Accent gradient line */}
-      <div className="h-0.5 shrink-0 bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-500" />
-
       {/* Prompt bar */}
-      <PromptBar prompt={prompt} agentCount={agents.length} />
+      <PromptBar
+        prompt={prompt}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        onStop={handleStop}
+      />
 
-      {/* Main content: browser + thinking sidebar */}
+      {/* Main content: browser/grid + thinking sidebar */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Agent browser */}
+        {/* Agent view */}
         <div className="flex-1 p-3 min-w-0">
-          <AgentBrowser
-            agents={agents}
-            activeAgentId={activeTab}
-            onTabChange={setActiveTab}
-            agentActivities={MOCK_AGENT_ACTIVITIES}
-          />
+          {viewMode === "tabs" ? (
+            <AgentBrowser
+              agents={agents}
+              activeAgentId={activeTab}
+              onTabChange={setActiveTab}
+              agentActivities={MOCK_AGENT_ACTIVITIES}
+              onAgentCommand={handleAgentCommand}
+            />
+          ) : (
+            <AgentGrid
+              agents={agents}
+              agentActivities={MOCK_AGENT_ACTIVITIES}
+              onSelectAgent={handleGridSelectAgent}
+              onAgentCommand={handleAgentCommand}
+            />
+          )}
         </div>
 
         {/* Thinking sidebar */}
@@ -299,7 +338,6 @@ function SessionContent() {
           <ThinkingSidebar
             entries={thinkingEntries}
             agents={agents}
-            agentActivities={MOCK_AGENT_ACTIVITIES}
           />
         </div>
       </div>

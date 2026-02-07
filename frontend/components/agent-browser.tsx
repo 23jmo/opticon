@@ -1,16 +1,20 @@
 "use client";
 
+import { useState } from "react";
 import { Agent } from "@/lib/types";
 import { AgentActivity } from "@/lib/mock-data";
 import { AgentScreen } from "./agent-screen";
-import { ChevronLeft, ChevronRight, RotateCw, Lock } from "lucide-react";
+import { Send } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 interface AgentBrowserProps {
   agents: Agent[];
   activeAgentId: string;
   onTabChange: (agentId: string) => void;
   agentActivities: Record<string, AgentActivity>;
+  onAgentCommand?: (agentId: string, message: string) => void;
 }
 
 export function AgentBrowser({
@@ -18,22 +22,23 @@ export function AgentBrowser({
   activeAgentId,
   onTabChange,
   agentActivities,
+  onAgentCommand,
 }: AgentBrowserProps) {
   const activity = agentActivities[activeAgentId];
   const activeAgent = agents.find((a) => a.id === activeAgentId);
+  const [chatInput, setChatInput] = useState("");
+
+  const handleSendCommand = () => {
+    const trimmed = chatInput.trim();
+    if (!trimmed) return;
+    onAgentCommand?.(activeAgentId, trimmed);
+    setChatInput("");
+  };
 
   return (
     <div className="flex h-full flex-col rounded-xl border border-border bg-muted/30 overflow-hidden shadow-xl shadow-black/20">
-      {/* Window chrome: traffic lights + tabs */}
-      <div className="flex items-center bg-muted/60 pl-3 pr-2 pt-2.5 pb-0">
-        {/* Traffic lights */}
-        <div className="flex gap-1.5 mr-3 mb-2 shrink-0">
-          <div className="size-[11px] rounded-full bg-[#ff5f57]" />
-          <div className="size-[11px] rounded-full bg-[#febc2e]" />
-          <div className="size-[11px] rounded-full bg-[#28c840]" />
-        </div>
-
-        {/* Tabs */}
+      {/* Tabs */}
+      <div className="flex items-center bg-muted/60 px-2 pt-3 pb-0">
         <div className="flex gap-0.5 min-w-0">
           {agents.map((agent) => {
             const isActive = agent.id === activeAgentId;
@@ -69,31 +74,6 @@ export function AgentBrowser({
         </div>
       </div>
 
-      {/* Address bar */}
-      <div className="flex items-center gap-2 border-b border-border bg-muted px-3 py-1.5">
-        <div className="flex items-center gap-0.5 text-muted-foreground/40 shrink-0">
-          <ChevronLeft className="size-4" />
-          <ChevronRight className="size-4" />
-          <RotateCw className="size-3 ml-1" />
-        </div>
-
-        <div className="flex-1 flex items-center gap-2 rounded-full bg-background/80 px-3 py-1 min-w-0">
-          {activity?.url && (
-            <>
-              <Lock className="size-3 text-muted-foreground/40 shrink-0" />
-              <span className="text-[11px] text-muted-foreground font-mono truncate">
-                {activity.url}
-              </span>
-            </>
-          )}
-          {!activity?.url && (
-            <span className="text-[11px] text-muted-foreground/40">
-              Waiting for connection...
-            </span>
-          )}
-        </div>
-      </div>
-
       {/* Screen content */}
       <div className="flex-1 overflow-hidden bg-background">
         <AgentScreen
@@ -101,6 +81,33 @@ export function AgentBrowser({
           activity={activity}
           status={activeAgent?.status || "initializing"}
         />
+      </div>
+
+      {/* Chat input */}
+      <div className="shrink-0 border-t border-border bg-card px-3 py-2">
+        <div className="flex items-center gap-2">
+          <Input
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSendCommand();
+              }
+            }}
+            placeholder="Send a command to this agent..."
+            className="h-8 text-sm bg-background"
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 shrink-0 text-muted-foreground hover:text-primary"
+            onClick={handleSendCommand}
+            disabled={!chatInput.trim()}
+          >
+            <Send className="size-3.5" />
+          </Button>
+        </div>
       </div>
     </div>
   );
