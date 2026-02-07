@@ -13,6 +13,93 @@ import e2b_tools
 
 logger = logging.getLogger(__name__)
 
+SYSTEM_PROMPT = (
+    "You are an AI agent controlling a Linux desktop via tools. "
+    "You can take screenshots to see the screen, then click, type, or press keys to interact. "
+    "Always call take_screenshot first to see what's on screen before acting. "
+    "After each action, take another screenshot to verify the result. "
+    "When your task is complete, respond with a text summary of what you accomplished — do NOT call any more tools."
+)
+
+MODEL = "anthropic/claude-sonnet-4-5-20250929"
+MAX_STEPS = 50
+
+
+async def run_agent_loop(client, messages, on_step=None):
+    """
+    Custom observe-think-act loop using Dedalus chat.completions.create().
+
+    Screenshots are injected as image_url content blocks so the model
+    actually sees the desktop. Other tool results are injected as text.
+
+    Returns the final text response from the model.
+    """
+    for step in range(MAX_STEPS):
+        response = await client.chat.completions.create(
+            model=MODEL,
+            messages=messages,
+            tools=e2b_tools.TOOL_SCHEMAS,
+        )
+
+        choice = response.choices[0]
+        msg = choice.message
+
+        # If the model responded with text and no tool calls, we're done
+        if not msg.tool_calls:
+            return msg.content or "(no response)"
+
+        # Append the assistant message (with tool_calls) to history
+        messages.append(msg.to_dict() if hasattr(msg, "to_dict") else {
+            "role": "assistant",
+            "content": msg.content,
+            "tool_calls": [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                }
+                for tc in msg.tool_calls
+            ],
+        })
+
+        # Execute each tool call and append results
+        for tc in msg.tool_calls:
+            name = tc.function.name
+            try:
+                args = json.loads(tc.function.arguments)
+            except json.JSONDecodeError:
+                args = {}
+
+            if on_step:
+                await on_step(step + 1, name, args)
+
+            result = e2b_tools.execute_tool(name, args)
+
+            if name == "take_screenshot":
+                # Inject screenshot as an image the model can SEE
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": [
+                        {"type": "text", "text": "Here is the current screenshot:"},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{result}",
+                                "detail": "high",
+                            },
+                        },
+                    ],
+                })
+            else:
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": result,
+                })
+
+    return "(max steps reached)"
+
 
 async def main():
     session_id = os.environ["SESSION_ID"]
@@ -36,7 +123,7 @@ async def main():
     # --- Boot E2B sandbox ---
     desktop = None
     try:
-        desktop = Sandbox()  # E2B_API_KEY read from env automatically
+        desktop = Sandbox.create()
         desktop.stream.start()
         stream_url = desktop.stream.get_url()
         await emit("agent:stream_ready", {"streamUrl": stream_url})
@@ -50,9 +137,8 @@ async def main():
     # --- Init tools ---
     e2b_tools.init(desktop)
 
-    # --- Init Daedalus agent ---
-    client = AsyncDedalus()  # DEDALUS_API_KEY read from env automatically
-    runner = client.agents.get_runner()
+    # --- Init Daedalus client ---
+    client = AsyncDedalus()
 
     # --- Task loop ---
     try:
@@ -83,20 +169,19 @@ async def main():
                 )
                 logger.info("Starting task %s: %s", task["id"], task["description"])
 
+                async def on_step(step, name, args):
+                    logger.info("  Step %d: %s(%s)", step, name, args)
+                    await emit("agent:thinking", {
+                        "action": f"Tool: {name}",
+                        "detail": json.dumps(args),
+                    })
+
                 try:
-                    prompt = (
-                        f"You are controlling a Linux desktop to complete this task:\n\n"
-                        f"{task['description']}\n\n"
-                        f"Use take_screenshot() first to see the screen, then use click, "
-                        f"type_text, press_key to interact. Take screenshots between actions "
-                        f"to verify results. When done, summarize what you accomplished."
-                    )
-                    response = await runner.run(
-                        input=prompt,
-                        tools=e2b_tools.ALL_TOOLS,
-                        max_steps=50,
-                    )
-                    result = str(response)
+                    messages = [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": f"Complete this task: {task['description']}"},
+                    ]
+                    result = await run_agent_loop(client, messages, on_step=on_step)
                 except Exception as e:
                     result = f"Error: {e}"
                     await emit(
