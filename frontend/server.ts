@@ -24,6 +24,10 @@ import type {
   AgentTerminatedEvent,
   WhiteboardUpdatedEvent,
 } from "./lib/types";
+import {
+  persistTodoStatus,
+  persistSessionStatus,
+} from "./lib/db/session-persist";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "localhost";
@@ -151,6 +155,9 @@ app.prepare().then(() => {
       const { todoId, agentId, result } = data;
       completeTask(sessionId, todoId, result);
 
+      // Persist todo completion to database
+      persistTodoStatus(todoId, "completed", result).catch(console.error);
+
       io.to(`session:${sessionId}`).emit("task:completed", {
         todoId,
         agentId,
@@ -178,6 +185,11 @@ app.prepare().then(() => {
         io.to(room).emit("session:complete", { sessionId });
         io.to(room).emit("task:none");
         console.log(`[server] Session ${sessionId} — all tasks completed`);
+
+        // Persist session completion
+        persistSessionStatus(sessionId, "completed", new Date()).catch(
+          console.error
+        );
       }
       // Otherwise: no pending tasks but session not complete — agent idles
     });
@@ -261,5 +273,10 @@ function checkSessionComplete(sessionId: string): void {
       // Socket.io may not be available
     }
     console.log(`[server] Session ${sessionId} complete`);
+
+    // Persist session completion
+    persistSessionStatus(sessionId, "completed", new Date()).catch(
+      console.error
+    );
   }
 }

@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, LogOut } from "lucide-react";
+import { Loader2, LogOut, History } from "lucide-react";
+import { SessionHistorySidebar } from "@/components/session-history-sidebar";
 
 export default function Home() {
   const { data: authSession } = useSession();
@@ -13,6 +14,7 @@ export default function Home() {
   const [agentCount, setAgentCount] = useState(2);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const router = useRouter();
 
   const handleSubmit = async () => {
@@ -60,35 +62,54 @@ export default function Home() {
   };
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center">
-      <div className="dot-grid absolute inset-0 pointer-events-none" />
-
-      {authSession?.user && (
-        <div className="absolute top-4 right-4 z-20 flex items-center gap-3">
-          {authSession.user.image ? (
-            <img
-              src={authSession.user.image}
-              alt=""
-              className="size-8 rounded-full"
-            />
-          ) : (
-            <div className="flex size-8 items-center justify-center rounded-full bg-primary/20 text-xs font-medium text-primary">
-              {authSession.user.name?.[0] || authSession.user.email?.[0] || "?"}
-            </div>
-          )}
-          <span className="text-sm text-zinc-400">
-            {authSession.user.name || authSession.user.email}
-          </span>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => signOut()}
-            className="text-zinc-500 hover:text-zinc-300"
-          >
-            <LogOut className="size-4" />
-          </Button>
+    <div className="flex min-h-screen">
+      {/* Sidebar */}
+      {sidebarOpen && (
+        <div className="w-[320px] shrink-0 h-screen sticky top-0">
+          <SessionHistorySidebar onClose={() => setSidebarOpen(false)} />
         </div>
       )}
+
+      {/* Main content */}
+      <div className="relative flex flex-1 min-h-screen items-center justify-center">
+        <div className="dot-grid absolute inset-0 pointer-events-none" />
+
+        {authSession?.user && (
+          <div className="absolute top-4 right-4 z-20 flex items-center gap-3">
+            {!sidebarOpen && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setSidebarOpen(true)}
+                className="text-zinc-500 hover:text-zinc-300"
+              >
+                <History className="size-4" />
+              </Button>
+            )}
+            {authSession.user.image ? (
+              <img
+                src={authSession.user.image}
+                alt=""
+                className="size-8 rounded-full"
+              />
+            ) : (
+              <div className="flex size-8 items-center justify-center rounded-full bg-primary/20 text-xs font-medium text-primary">
+                {authSession.user.name?.[0] || authSession.user.email?.[0] || "?"}
+              </div>
+            )}
+            <span className="text-sm text-zinc-400">
+              {authSession.user.name || authSession.user.email}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => signOut()}
+              className="text-zinc-500 hover:text-zinc-300"
+            >
+              <LogOut className="size-4" />
+            </Button>
+          </div>
+        )}
 
       <main className="relative z-10 w-full max-w-2xl px-6">
         <div className="space-y-8">
@@ -201,6 +222,7 @@ export default function Home() {
           )}
         </div>
       </main>
+      </div>
     </div>
   );
 }
