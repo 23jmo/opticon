@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { AgentActivity } from "@/lib/mock-data";
-import { Monitor, Search, FileText } from "lucide-react";
+import { Monitor, Search, FileText, Wifi, Check } from "lucide-react";
 import { Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface AgentScreenProps {
   agentId: string;
@@ -11,21 +13,38 @@ interface AgentScreenProps {
 }
 
 export function AgentScreen({ agentId, activity, status }: AgentScreenProps) {
-  if (status === "initializing") {
+  if (status === "booting") {
+    return <BootSequence gradient={activity?.gradient} />;
+  }
+
+  if (status === "error") {
     return (
       <div
-        className={`flex h-full items-center justify-center bg-gradient-to-br ${activity.gradient}`}
+        className={`flex h-full items-center justify-center bg-gradient-to-br ${activity?.gradient || "from-red-950/80 to-slate-950"}`}
       >
         <div className="text-center space-y-3">
-          <div className="mx-auto flex size-12 items-center justify-center rounded-xl border border-border bg-background/10 backdrop-blur">
-            <Monitor className="size-5 text-muted-foreground" />
+          <div className="mx-auto flex size-12 items-center justify-center rounded-xl border border-red-500/30 bg-red-500/10 backdrop-blur">
+            <Monitor className="size-5 text-red-400" />
           </div>
           <div className="space-y-1">
-            <p className="text-sm text-muted-foreground">
-              Booting sandbox...
+            <p className="text-sm text-red-400 font-medium">
+              Agent error
             </p>
-            <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground/50" />
+            <p className="text-xs text-muted-foreground/50">
+              This agent encountered an error
+            </p>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!activity) {
+    return (
+      <div className="flex h-full items-center justify-center bg-gradient-to-br from-slate-950 to-zinc-950">
+        <div className="text-center space-y-3">
+          <Loader2 className="mx-auto size-5 animate-spin text-muted-foreground/50" />
+          <p className="text-sm text-muted-foreground/50">Loading...</p>
         </div>
       </div>
     );
@@ -35,6 +54,76 @@ export function AgentScreen({ agentId, activity, status }: AgentScreenProps) {
   if (activity.label === "Writing") return <MockDocsScreen />;
   if (activity.label === "Analysis") return <MockTerminalScreen />;
   return <MockWaitingScreen />;
+}
+
+function BootSequence({ gradient }: { gradient?: string }) {
+  const [phase, setPhase] = useState(0);
+
+  useEffect(() => {
+    const t1 = setTimeout(() => setPhase(1), 1500);
+    const t2 = setTimeout(() => setPhase(2), 3500);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, []);
+
+  const phases = [
+    { label: "Booting sandbox", icon: Monitor },
+    { label: "Connecting stream", icon: Wifi },
+    { label: "Ready", icon: Check },
+  ];
+
+  return (
+    <div
+      className={`flex h-full items-center justify-center bg-gradient-to-br ${gradient || "from-slate-950 to-zinc-950"}`}
+    >
+      <div className="text-center space-y-5">
+        <div className="mx-auto flex size-14 items-center justify-center rounded-xl border border-border bg-background/10 backdrop-blur">
+          <Monitor className="size-6 text-muted-foreground" />
+        </div>
+
+        <div className="space-y-4">
+          {phases.map((p, i) => {
+            const Icon = p.icon;
+            const isActive = i === phase;
+            const isDone = i < phase;
+
+            return (
+              <div
+                key={i}
+                className={cn(
+                  "flex items-center gap-3 text-sm transition-all duration-300",
+                  isActive
+                    ? "text-foreground"
+                    : isDone
+                      ? "text-muted-foreground/60"
+                      : "text-muted-foreground/30"
+                )}
+              >
+                {isDone ? (
+                  <Check className="size-4 text-emerald-400" />
+                ) : isActive ? (
+                  <Loader2 className="size-4 animate-spin text-primary" />
+                ) : (
+                  <Icon className="size-4" />
+                )}
+                <span>{p.label}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Progress bar */}
+        <div className="w-48 mx-auto h-1 bg-white/5 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-primary/60 rounded-full transition-all duration-1000 ease-out"
+            style={{ width: `${((phase + 1) / phases.length) * 100}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function MockScholarScreen() {

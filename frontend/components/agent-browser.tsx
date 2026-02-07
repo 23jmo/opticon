@@ -4,7 +4,8 @@ import { useState } from "react";
 import { Agent } from "@/lib/types";
 import { AgentActivity } from "@/lib/mock-data";
 import { AgentScreen } from "./agent-screen";
-import { Send, Ellipsis, X } from "lucide-react";
+import { VMTab } from "./vm-tab";
+import { Send, Ellipsis, X, Mouse, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,8 @@ interface AgentBrowserProps {
   activeAgentId: string;
   onTabChange: (agentId: string) => void;
   agentActivities: Record<string, AgentActivity>;
+  sessionId?: string;
+  whiteboard?: string;
   onAgentCommand?: (agentId: string, message: string) => void;
 }
 
@@ -22,9 +25,13 @@ export function AgentBrowser({
   activeAgentId,
   onTabChange,
   agentActivities,
+  sessionId,
+  whiteboard,
   onAgentCommand,
 }: AgentBrowserProps) {
-  const activity = agentActivities[activeAgentId];
+  const [isInteractive, setIsInteractive] = useState(false);
+  const isMock = sessionId === "demo";
+  const isWhiteboardTab = activeAgentId === "__whiteboard__";
   const activeAgent = agents.find((a) => a.id === activeAgentId);
   const [chatInput, setChatInput] = useState("");
 
@@ -40,7 +47,7 @@ export function AgentBrowser({
       {/* Tab bar */}
       <div className="flex items-stretch border-b border-border">
         {agents.map((agent, i) => {
-          const isActive = agent.id === activeAgentId;
+          const isActive = agent.id === activeAgentId && !isWhiteboardTab;
 
           return (
             <button
@@ -78,42 +85,138 @@ export function AgentBrowser({
             </button>
           );
         })}
+
+        {/* Whiteboard tab */}
+        {whiteboard !== undefined && (
+          <button
+            onClick={() => onTabChange("__whiteboard__")}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2.5 text-[13px] font-medium transition-colors min-w-0",
+              isWhiteboardTab
+                ? "bg-background text-foreground"
+                : "bg-muted/40 text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <span className="flex items-center justify-center size-5 rounded-full border border-primary/30 bg-primary/10 text-[11px] text-primary shrink-0">
+              W
+            </span>
+            <span className="truncate">Whiteboard</span>
+          </button>
+        )}
+
+        {/* Spacer to push interactive toggle to the right */}
+        <div className="flex-1" />
+
+        {/* Interactive mode toggle */}
+        {!isWhiteboardTab && !isMock && activeAgent?.streamUrl && (
+          <button
+            onClick={() => setIsInteractive((prev) => !prev)}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-2.5 text-[11px] font-medium transition-all shrink-0 self-center mr-2",
+              isInteractive
+                ? "text-primary"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            title={isInteractive ? "Switch to view-only" : "Take control of desktop"}
+          >
+            {isInteractive ? (
+              <Mouse className="size-3" />
+            ) : (
+              <Eye className="size-3" />
+            )}
+            {isInteractive ? "Control" : "View only"}
+          </button>
+        )}
       </div>
 
       {/* Screen content */}
-      <div className="flex-1 overflow-hidden bg-background">
-        <AgentScreen
-          agentId={activeAgentId}
-          activity={activity}
-          status={activeAgent?.status || "initializing"}
-        />
+      <div className="flex-1 overflow-hidden bg-background relative">
+        {/* Whiteboard tab */}
+        {whiteboard !== undefined && (
+          <div className={`absolute inset-0 ${isWhiteboardTab ? "visible z-10" : "invisible z-0"}`}>
+            <WhiteboardView content={whiteboard || ""} />
+          </div>
+        )}
+
+        {/* Agent tabs -- all rendered to keep iframes alive across tab switches */}
+        {agents.map((agent) => {
+          const isActive = agent.id === activeAgentId && !isWhiteboardTab;
+          const agentActivity = agentActivities[agent.id];
+
+          if (isMock || !agent.streamUrl) {
+            return isActive ? (
+              <div key={agent.id} className="absolute inset-0 z-10">
+                <AgentScreen
+                  agentId={agent.id}
+                  activity={agentActivity}
+                  status={agent.status || "booting"}
+                />
+              </div>
+            ) : null;
+          }
+
+          return (
+            <VMTab
+              key={agent.id}
+              agentId={agent.id}
+              sessionId={sessionId || ""}
+              streamUrl={agent.streamUrl}
+              isActive={isActive}
+              isInteractive={isActive && isInteractive}
+            />
+          );
+        })}
       </div>
 
       {/* Chat input */}
-      <div className="shrink-0 border-t border-border bg-card px-3 py-2">
-        <div className="flex items-center gap-2">
-          <Input
-            value={chatInput}
-            onChange={(e) => setChatInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSendCommand();
-              }
-            }}
-            placeholder="Send a command to this agent..."
-            className="h-8 text-sm bg-background"
-          />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8 shrink-0 text-muted-foreground hover:text-primary"
-            onClick={handleSendCommand}
-            disabled={!chatInput.trim()}
-          >
-            <Send className="size-3.5" />
-          </Button>
+      {!isWhiteboardTab && (
+        <div className="shrink-0 border-t border-border bg-card px-3 py-2">
+          <div className="flex items-center gap-2">
+            <Input
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendCommand();
+                }
+              }}
+              placeholder="Send a command to this agent..."
+              className="h-8 text-sm bg-background"
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 shrink-0 text-muted-foreground hover:text-primary"
+              onClick={handleSendCommand}
+              disabled={!chatInput.trim()}
+            >
+              <Send className="size-3.5" />
+            </Button>
+          </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function WhiteboardView({ content }: { content: string }) {
+  if (!content) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <p className="text-sm text-muted-foreground/50">
+          Whiteboard is empty. Agents will write here as they work.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full overflow-auto p-6">
+      <div className="prose prose-invert prose-sm max-w-none">
+        <pre className="whitespace-pre-wrap text-sm text-muted-foreground leading-relaxed font-mono">
+          {content}
+        </pre>
       </div>
     </div>
   );

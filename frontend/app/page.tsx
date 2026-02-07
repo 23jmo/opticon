@@ -2,11 +2,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSession, signOut } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2 } from "lucide-react";
+import { Loader2, LogOut } from "lucide-react";
 
 export default function Home() {
+  const { data: authSession } = useSession();
   const [prompt, setPrompt] = useState("");
   const [agentCount, setAgentCount] = useState(2);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -20,16 +22,34 @@ export default function Home() {
     setError(null);
 
     try {
-      // For demo mode, redirect directly with prompt in search params
-      const params = new URLSearchParams({
-        prompt: prompt.trim(),
-        agents: String(agentCount),
+      const response = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: prompt.trim(),
+          agentCount,
+        }),
       });
-      router.push(`/session/demo?${params.toString()}`);
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to create session");
+      }
+
+      const { sessionId } = await response.json();
+      router.push(`/session/${sessionId}/approve`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
       setIsSubmitting(false);
     }
+  };
+
+  const handleDemoMode = () => {
+    const params = new URLSearchParams({
+      prompt: prompt.trim() || "Write a comprehensive research paper on Google Docs about the rise of Daedalus Labs...",
+      agents: String(agentCount),
+    });
+    router.push(`/session/demo?${params.toString()}`);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -42,6 +62,33 @@ export default function Home() {
   return (
     <div className="relative flex min-h-screen items-center justify-center">
       <div className="dot-grid absolute inset-0 pointer-events-none" />
+
+      {authSession?.user && (
+        <div className="absolute top-4 right-4 z-20 flex items-center gap-3">
+          {authSession.user.image ? (
+            <img
+              src={authSession.user.image}
+              alt=""
+              className="size-8 rounded-full"
+            />
+          ) : (
+            <div className="flex size-8 items-center justify-center rounded-full bg-primary/20 text-xs font-medium text-primary">
+              {authSession.user.name?.[0] || authSession.user.email?.[0] || "?"}
+            </div>
+          )}
+          <span className="text-sm text-zinc-400">
+            {authSession.user.name || authSession.user.email}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => signOut()}
+            className="text-zinc-500 hover:text-zinc-300"
+          >
+            <LogOut className="size-4" />
+          </Button>
+        </div>
+      )}
 
       <main className="relative z-10 w-full max-w-2xl px-6">
         <div className="space-y-8">
@@ -91,21 +138,32 @@ export default function Home() {
                 </div>
               </div>
 
-              <Button
-                onClick={handleSubmit}
-                disabled={isSubmitting || !prompt.trim()}
-                size="sm"
-                className="gap-2"
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="size-3.5 animate-spin" />
-                    Launching...
-                  </>
-                ) : (
-                  "Launch"
-                )}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDemoMode}
+                  disabled={isSubmitting}
+                  className="text-zinc-400"
+                >
+                  Demo
+                </Button>
+                <Button
+                  onClick={handleSubmit}
+                  disabled={isSubmitting || !prompt.trim()}
+                  size="sm"
+                  className="gap-2"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="size-3.5 animate-spin" />
+                      Decomposing...
+                    </>
+                  ) : (
+                    "Launch"
+                  )}
+                </Button>
+              </div>
             </div>
           </div>
 

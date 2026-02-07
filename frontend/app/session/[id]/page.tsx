@@ -5,14 +5,17 @@ import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { Socket } from "socket.io-client";
 import {
   Agent,
+  Todo,
   ThinkingEntry,
-  TaskCreatedEvent,
   TaskAssignedEvent,
   AgentThinkingEvent,
   AgentReasoningEvent,
   AgentStreamReadyEvent,
   AgentTerminatedEvent,
-  SessionCompleteEvent,
+  AgentJoinEvent,
+  AgentErrorEvent,
+  TaskCompletedEvent,
+  WhiteboardUpdatedEvent,
 } from "@/lib/types";
 import { createSessionSocket } from "@/lib/socket-client";
 import {
@@ -47,6 +50,9 @@ function SessionContent() {
     isMock ? MOCK_AGENTS[0].id : ""
   );
   const [thinkingEntries, setThinkingEntries] = useState<ThinkingEntry[]>([]);
+  const [todos, setTodos] = useState<Todo[]>([]);
+  const [whiteboard, setWhiteboard] = useState<string>("");
+  const [sessionComplete, setSessionComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(!isMock);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"tabs" | "grid">("tabs");
@@ -111,13 +117,24 @@ function SessionContent() {
         const response = await fetch(`/api/sessions/${sessionId}`);
         if (response.ok) {
           const data = await response.json();
+          if (data.status === "pending_approval") {
+            router.push(`/session/${sessionId}/approve`);
+            return;
+          }
           if (data.agents) {
             setAgents(data.agents);
             if (data.agents.length > 0) {
               setActiveTab(data.agents[0].id);
             }
           }
+          if (data.todos) {
+            setTodos(data.todos);
+          }
+          if (data.whiteboard) {
+            setWhiteboard(data.whiteboard);
+          }
           if (data.status === "completed") {
+            setSessionComplete(true);
             setIsLoading(false);
             return;
           }
@@ -140,38 +157,56 @@ function SessionContent() {
       });
 
       socket.on("reconnect", () => {
-        socket.emit("join-session", sessionId);
+        socket.emit("session:join", sessionId);
       });
 
-      socket.on("task:created", (data: TaskCreatedEvent) => {
-        void data;
+      socket.on("task:created", (data: Todo) => {
+        setTodos((prev) => [...prev, data]);
       });
 
       socket.on("task:assigned", (data: TaskAssignedEvent) => {
-        void data;
+        setTodos((prev) =>
+          prev.map((t) =>
+            t.id === data.todoId
+              ? { ...t, status: "assigned" as const, assignedTo: data.agentId }
+              : t
+          )
+        );
       });
 
-      socket.on("task:completed", (data: { taskId: string }) => {
-        void data;
+      socket.on("task:completed", (data: TaskCompletedEvent) => {
+        setTodos((prev) =>
+          prev.map((t) =>
+            t.id === data.todoId
+              ? { ...t, status: "completed" as const, result: data.result }
+              : t
+          )
+        );
+        setAgents((prev) =>
+          prev.map((a) =>
+            a.id === data.agentId
+              ? { ...a, tasksCompleted: (a.tasksCompleted || 0) + 1 }
+              : a
+          )
+        );
       });
 
-      socket.on(
-        "agent:initialized",
-        (data: { agentId: string; sessionId: string }) => {
-          const newAgent: Agent = {
-            id: data.agentId,
-            sessionId: data.sessionId,
-            status: "initializing",
-          };
-          setAgents((prev) => {
-            const updated = [...prev, newAgent];
-            setActiveTab((current) => current || updated[0].id);
-            return updated;
-          });
-        }
-      );
+      socket.on("agent:join", (data: AgentJoinEvent) => {
+        const newAgent: Agent = {
+          id: data.agentId,
+          sessionId: data.sessionId,
+          status: "booting",
+          currentTaskId: null,
+        };
+        setAgents((prev) => {
+          if (prev.find((a) => a.id === data.agentId)) return prev;
+          const updated = [...prev, newAgent];
+          setActiveTab((current) => current || updated[0].id);
+          return updated;
+        });
+      });
 
-      socket.on("agent:stream-ready", (data: AgentStreamReadyEvent) => {
+      socket.on("agent:stream_ready", (data: AgentStreamReadyEvent) => {
         setAgents((prev) =>
           prev.map((agent) =>
             agent.id === data.agentId
@@ -191,6 +226,7 @@ function SessionContent() {
           agentId: data.agentId,
           timestamp: data.timestamp,
           action: data.action,
+          isError: data.isError,
         };
         setThinkingEntries((prev) => [...prev, entry]);
       });
@@ -232,6 +268,26 @@ function SessionContent() {
         }
       });
 
+      socket.on("agent:error", (data: AgentErrorEvent) => {
+        setAgents((prev) =>
+          prev.map((agent) =>
+            agent.id === data.agentId
+              ? { ...agent, status: "error" as const }
+              : agent
+          )
+        );
+        setThinkingEntries((prev) => [
+          ...prev,
+          {
+            id: `${data.agentId}-error-${Date.now()}-${Math.random()}`,
+            agentId: data.agentId,
+            timestamp: new Date().toISOString(),
+            action: `Error: ${data.error}`,
+            isError: true,
+          },
+        ]);
+      });
+
       socket.on("agent:terminated", (data: AgentTerminatedEvent) => {
         setAgents((prev) =>
           prev.map((agent) =>
@@ -242,8 +298,12 @@ function SessionContent() {
         );
       });
 
-      socket.on("session:complete", (data: SessionCompleteEvent) => {
-        void data;
+      socket.on("whiteboard:updated", (data: WhiteboardUpdatedEvent) => {
+        setWhiteboard(data.content);
+      });
+
+      socket.on("session:complete", () => {
+        setSessionComplete(true);
       });
 
       setIsLoading(false);
@@ -257,7 +317,7 @@ function SessionContent() {
         socketRef.current = null;
       }
     };
-  }, [sessionId, isMock]);
+  }, [sessionId, isMock, router]);
 
   if (isLoading) {
     return (
@@ -303,6 +363,21 @@ function SessionContent() {
 
   return (
     <div className="flex h-screen flex-col">
+      {/* Completion banner */}
+      {sessionComplete && (
+        <div className="shrink-0 border-b border-emerald-500/20 bg-emerald-500/10 px-5 py-3 flex items-center justify-between">
+          <p className="text-sm text-emerald-400 font-medium">
+            All agents have completed their tasks
+          </p>
+          <button
+            onClick={() => router.push(`/session/${sessionId}/summary`)}
+            className="text-sm text-emerald-400 hover:text-emerald-300 font-medium transition-colors"
+          >
+            View Summary
+          </button>
+        </div>
+      )}
+
       {/* Prompt bar */}
       <PromptBar
         prompt={prompt}
@@ -321,6 +396,8 @@ function SessionContent() {
               activeAgentId={activeTab}
               onTabChange={setActiveTab}
               agentActivities={MOCK_AGENT_ACTIVITIES}
+              sessionId={sessionId}
+              whiteboard={whiteboard}
               onAgentCommand={handleAgentCommand}
             />
           ) : (
@@ -338,6 +415,8 @@ function SessionContent() {
           <ThinkingSidebar
             entries={thinkingEntries}
             agents={agents}
+            agentActivities={MOCK_AGENT_ACTIVITIES}
+            activeAgentId={activeTab}
           />
         </div>
       </div>

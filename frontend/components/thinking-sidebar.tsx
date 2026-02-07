@@ -3,12 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import { ThinkingEntry } from "@/lib/types";
 import { Agent } from "@/lib/types";
+import { AgentActivity } from "@/lib/mock-data";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ThinkingSidebarProps {
   entries: ThinkingEntry[];
   agents: Agent[];
+  agentActivities: Record<string, AgentActivity>;
+  activeAgentId?: string;
 }
 
 function formatToolDetails(
@@ -54,17 +57,27 @@ function getAgentNumber(agentId: string): string {
   return match ? String(parseInt(match[1], 10)) : agentId.slice(0, 4);
 }
 
-export function ThinkingSidebar({ entries, agents }: ThinkingSidebarProps) {
+export function ThinkingSidebar({
+  entries,
+  agents,
+  agentActivities,
+  activeAgentId,
+}: ThinkingSidebarProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [expandedEntries, setExpandedEntries] = useState<Set<string>>(
     new Set()
   );
+  const [filterAgent, setFilterAgent] = useState<string | null>(null);
+
+  const filteredEntries = filterAgent
+    ? entries.filter((e) => e.agentId === filterAgent)
+    : entries;
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [entries]);
+  }, [filteredEntries]);
 
   const toggleExpand = (entryId: string) => {
     setExpandedEntries((prev) => {
@@ -87,14 +100,50 @@ export function ThinkingSidebar({ entries, agents }: ThinkingSidebarProps) {
             Activity
           </h3>
           <span className="text-[11px] tabular-nums text-muted-foreground">
-            {entries.length}
+            {filteredEntries.length}
           </span>
         </div>
+
+        {/* Agent filter */}
+        {agents.length > 1 && (
+          <div className="flex gap-1 mt-2 flex-wrap">
+            <button
+              onClick={() => setFilterAgent(null)}
+              className={cn(
+                "rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors",
+                filterAgent === null
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              All
+            </button>
+            {agents.map((agent) => {
+              const activity = agentActivities[agent.id];
+              return (
+                <button
+                  key={agent.id}
+                  onClick={() =>
+                    setFilterAgent(filterAgent === agent.id ? null : agent.id)
+                  }
+                  className={cn(
+                    "rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors",
+                    filterAgent === agent.id
+                      ? "bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {activity?.label || getAgentNumber(agent.id)}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Feed */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        {entries.length === 0 ? (
+        {filteredEntries.length === 0 ? (
           <div className="flex items-center justify-center h-32">
             <p className="text-[13px] text-muted-foreground">
               Waiting for activity...
@@ -102,9 +151,9 @@ export function ThinkingSidebar({ entries, agents }: ThinkingSidebarProps) {
           </div>
         ) : (
           <div className="py-1">
-            {entries.map((entry, index) => {
+            {filteredEntries.map((entry, index) => {
               const isExpanded = expandedEntries.has(entry.id);
-              const isLatest = index === entries.length - 1;
+              const isLatest = index === filteredEntries.length - 1;
               const hasDetails =
                 entry.reasoning || (entry.toolName && entry.toolArgs);
 
@@ -113,7 +162,11 @@ export function ThinkingSidebar({ entries, agents }: ThinkingSidebarProps) {
                   key={entry.id}
                   className={cn(
                     "px-4 py-2.5 border-b border-border/50 transition-colors",
-                    isLatest ? "bg-muted/50" : "hover:bg-muted/30"
+                    entry.isError
+                      ? "bg-destructive/10"
+                      : isLatest
+                        ? "bg-muted/50"
+                        : "hover:bg-muted/30"
                   )}
                 >
                   {/* Main row */}
@@ -129,9 +182,11 @@ export function ThinkingSidebar({ entries, agents }: ThinkingSidebarProps) {
                         <p
                           className={cn(
                             "text-[13px] leading-snug",
-                            isLatest
-                              ? "text-foreground font-medium"
-                              : "text-foreground/80"
+                            entry.isError
+                              ? "text-destructive font-medium"
+                              : isLatest
+                                ? "text-foreground font-medium"
+                                : "text-foreground/80"
                           )}
                         >
                           {entry.action}

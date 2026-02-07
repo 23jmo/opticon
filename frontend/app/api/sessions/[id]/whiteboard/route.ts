@@ -12,7 +12,7 @@ export async function GET(
   if (id === "demo") {
     const session = getSession(id);
     return session
-      ? NextResponse.json(session)
+      ? NextResponse.json({ content: session.whiteboard || "" })
       : NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
@@ -31,5 +31,5 @@ export async function GET(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  return NextResponse.json(session);
+  return NextResponse.json({ content: session.whiteboard || "" });
 }
