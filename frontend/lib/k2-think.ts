@@ -1,9 +1,14 @@
 /**
  * K2 Think API client for task decomposition
  * Using IFM's advanced reasoning model
+ *
+ * API is OpenAI-compatible. Try these endpoints in order:
+ * 1. https://k2think.ai/v1/chat/completions (k2think.ai)
+ * 2. https://api.k2think.ai/v1/chat/completions (subdomain)
+ * 3. https://api.openai.com/v1/chat/completions (fallback with custom base)
  */
 
-const K2_API_URL = "https://api.ifm.ai/v1/chat/completions";
+const K2_API_URL = process.env.K2_API_URL || "https://k2think.ai/v1/chat/completions";
 const K2_API_KEY = process.env.K2_THINK_API_KEY || "IFM-Zps61SP4gl0nSMPE";
 
 interface K2Message {
@@ -35,29 +40,39 @@ export async function callK2Think(
     { role: "user", content: userPrompt },
   ];
 
-  const response = await fetch(K2_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${K2_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "k2-think",
-      messages,
-      max_tokens: maxTokens,
-      temperature: 0.7,
-    }),
-  });
+  console.log(`[K2 Think] Calling API at ${K2_API_URL}`);
 
-  if (!response.ok) {
-    const errorText = await response.text();
+  try {
+    const response = await fetch(K2_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${K2_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "k2-think",
+        messages,
+        max_tokens: maxTokens,
+        temperature: 0.7,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[K2 Think] API error (${response.status}):`, errorText);
+      throw new Error(
+        `K2 Think API error (${response.status}): ${errorText}`
+      );
+    }
+
+    const data = (await response.json()) as K2Response;
+    return data.choices[0].message.content;
+  } catch (error) {
+    console.error("[K2 Think] Fetch failed:", error);
     throw new Error(
-      `K2 Think API error (${response.status}): ${errorText}`
+      `K2 Think API unavailable. Please check the endpoint: ${K2_API_URL}. Error: ${error instanceof Error ? error.message : String(error)}`
     );
   }
-
-  const data = (await response.json()) as K2Response;
-  return data.choices[0].message.content;
 }
 
 /**
