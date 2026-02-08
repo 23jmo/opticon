@@ -5,7 +5,11 @@ import { Agent } from "@/lib/types";
 import { AgentActivity } from "@/lib/mock-data";
 import { AgentScreen } from "./agent-screen";
 import { VMTab } from "./vm-tab";
-import { ReplayScrubber } from "./replay-scrubber";
+import {
+  useReplayState,
+  ReplayFrameOverlay,
+  ReplayScrubberBar,
+} from "./replay-scrubber";
 import { Send, Ellipsis, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -36,6 +40,9 @@ export function AgentBrowser({
   const isWhiteboardTab = activeAgentId === "__whiteboard__";
   const [chatInput, setChatInput] = useState("");
 
+  const activeReplay = replays?.[activeAgentId];
+  const hasReplay = !!activeReplay && !isWhiteboardTab;
+
   const handleSendCommand = () => {
     const trimmed = chatInput.trim();
     if (!trimmed) return;
@@ -49,6 +56,7 @@ export function AgentBrowser({
       <div className="flex items-stretch border-b border-border">
         {agents.map((agent, i) => {
           const isActive = agent.id === activeAgentId && !isWhiteboardTab;
+          const agentHasReplay = !!replays?.[agent.id];
 
           return (
             <button
@@ -61,17 +69,13 @@ export function AgentBrowser({
                   : "bg-muted/40 text-muted-foreground hover:text-foreground"
               )}
             >
-              {/* Number badge */}
-              <span className="flex items-center justify-center size-5 rounded-full border border-border text-[11px] tabular-nums shrink-0">
+              <span className={cn(
+                "flex items-center justify-center size-5 rounded-full border text-[11px] tabular-nums shrink-0",
+                agentHasReplay ? "border-primary/40 bg-primary/10" : "border-border",
+              )}>
                 {i + 1}
               </span>
-
-              {/* Agent name */}
-              <span className="truncate font-medium">
-                {agent.name}
-              </span>
-
-              {/* Menu + close */}
+              <span className="truncate font-medium">{agent.name}</span>
               <span
                 className={cn(
                   "flex items-center gap-1 shrink-0 ml-1",
@@ -87,7 +91,6 @@ export function AgentBrowser({
           );
         })}
 
-        {/* Whiteboard tab */}
         {whiteboard !== undefined && (
           <button
             onClick={() => onTabChange("__whiteboard__")}
@@ -104,38 +107,118 @@ export function AgentBrowser({
             <span className="truncate">Whiteboard</span>
           </button>
         )}
-
       </div>
 
-      {/* Screen content */}
-      <div className="flex-1 overflow-hidden bg-background relative">
-        {/* Whiteboard tab */}
-        {whiteboard !== undefined && (
-          <div className={`absolute inset-0 ${isWhiteboardTab ? "visible z-10" : "invisible z-0"}`}>
-            <WhiteboardView content={whiteboard || ""} />
-          </div>
-        )}
-
-        {/* Agent tabs -- all rendered to keep iframes alive across tab switches */}
-        {agents.map((agent) => {
-          const isActive = agent.id === activeAgentId && !isWhiteboardTab;
-          const agentActivity = agentActivities[agent.id];
-          const agentReplay = replays?.[agent.id];
-
-          // Show replay scrubber for terminated agents that have a replay
-          if (agentReplay && agent.status === "terminated") {
-            return (
-              <div
-                key={agent.id}
-                className={`absolute inset-0 ${isActive ? "visible z-10" : "invisible z-0"}`}
-              >
-                <ReplayScrubber
-                  manifestUrl={agentReplay.manifestUrl}
-                  agentLabel={`Agent ${agent.id.slice(0, 6)}`}
-                />
+      {/* Screen content + bottom bar — wrapped together when replay is active */}
+      {hasReplay ? (
+        <ReplayEnabledView
+          manifestUrl={activeReplay.manifestUrl}
+          agents={agents}
+          activeAgentId={activeAgentId}
+          agentActivities={agentActivities}
+          sessionId={sessionId}
+          isMock={isMock}
+        />
+      ) : (
+        <>
+          {/* Screen content */}
+          <div className="flex-1 overflow-hidden bg-background relative">
+            {whiteboard !== undefined && (
+              <div className={`absolute inset-0 ${isWhiteboardTab ? "visible z-10" : "invisible z-0"}`}>
+                <WhiteboardView content={whiteboard || ""} />
               </div>
-            );
-          }
+            )}
+
+            {agents.map((agent) => {
+              const isActive = agent.id === activeAgentId && !isWhiteboardTab;
+              const agentActivity = agentActivities[agent.id];
+
+              if (isMock || !agent.streamUrl) {
+                return isActive ? (
+                  <div key={agent.id} className="absolute inset-0 z-10">
+                    <AgentScreen
+                      agentId={agent.id}
+                      activity={agentActivity}
+                      status={agent.status || "booting"}
+                    />
+                  </div>
+                ) : null;
+              }
+
+              return (
+                <VMTab
+                  key={agent.id}
+                  agentId={agent.id}
+                  sessionId={sessionId || ""}
+                  streamUrl={agent.streamUrl}
+                  isActive={isActive}
+                />
+              );
+            })}
+          </div>
+
+          {/* Chat input */}
+          {!isWhiteboardTab && (
+            <div className="shrink-0 border-t border-border bg-card px-3 py-2">
+              <div className="flex items-center gap-2">
+                <Input
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendCommand();
+                    }
+                  }}
+                  placeholder="Send a command to this agent..."
+                  className="h-8 text-sm bg-background"
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 shrink-0 text-muted-foreground hover:text-primary"
+                  onClick={handleSendCommand}
+                  disabled={!chatInput.trim()}
+                >
+                  <Send className="size-3.5" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * When replay exists for the active agent, this component manages shared state
+ * between the frame overlay (on top of the live screen) and the scrubber bar (bottom).
+ */
+function ReplayEnabledView({
+  manifestUrl,
+  agents,
+  activeAgentId,
+  agentActivities,
+  sessionId,
+  isMock,
+}: {
+  manifestUrl: string;
+  agents: Agent[];
+  activeAgentId: string;
+  agentActivities: Record<string, AgentActivity>;
+  sessionId?: string;
+  isMock: boolean;
+}) {
+  const replay = useReplayState(manifestUrl);
+
+  return (
+    <>
+      {/* Screen content with replay overlay */}
+      <div className="flex-1 overflow-hidden bg-background relative">
+        {agents.map((agent) => {
+          const isActive = agent.id === activeAgentId;
+          const agentActivity = agentActivities[agent.id];
 
           if (isMock || !agent.streamUrl) {
             return isActive ? (
@@ -159,37 +242,14 @@ export function AgentBrowser({
             />
           );
         })}
+
+        {/* Replay frame overlay — covers the live screen when scrubbed to a past frame */}
+        <ReplayFrameOverlay frame={replay.currentFrame} isLive={replay.isLive} />
       </div>
 
-      {/* Chat input */}
-      {!isWhiteboardTab && (
-        <div className="shrink-0 border-t border-border bg-card px-3 py-2">
-          <div className="flex items-center gap-2">
-            <Input
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSendCommand();
-                }
-              }}
-              placeholder="Send a command to this agent..."
-              className="h-8 text-sm bg-background"
-            />
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-8 shrink-0 text-muted-foreground hover:text-primary"
-              onClick={handleSendCommand}
-              disabled={!chatInput.trim()}
-            >
-              <Send className="size-3.5" />
-            </Button>
-          </div>
-        </div>
-      )}
-    </div>
+      {/* Scrubber bar replaces chat input */}
+      <ReplayScrubberBar {...replay} />
+    </>
   );
 }
 

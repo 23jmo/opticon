@@ -94,7 +94,7 @@ function SessionContent() {
     []
   );
 
-  // Mock mode: simulate streaming thinking entries
+  // Mock mode: simulate streaming thinking entries + demo replays
   useEffect(() => {
     if (!isMock) return;
 
@@ -114,6 +114,29 @@ function SessionContent() {
         }, delay)
       );
     });
+
+    // After 8 seconds, "terminate" agents 1 & 2 and give them mock replays
+    timers.push(
+      setTimeout(() => {
+        setAgents((prev) =>
+          prev.map((a) =>
+            a.id === "agent-001" || a.id === "agent-002"
+              ? { ...a, status: "terminated" as const }
+              : a
+          )
+        );
+        setReplays({
+          "agent-001": {
+            manifestUrl: "/api/replay/mock-manifest?agent=agent-001&frames=20",
+            frameCount: 20,
+          },
+          "agent-002": {
+            manifestUrl: "/api/replay/mock-manifest?agent=agent-002&frames=15",
+            frameCount: 15,
+          },
+        });
+      }, 8000)
+    );
 
     return () => timers.forEach(clearTimeout);
   }, [isMock, agents]);

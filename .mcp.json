@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "flowglad": {
+      "url": "https://app.flowglad.com/api/mcp",
+      "headers": {
+        "Authorization": "Bearer sk_test_ETh7_BCPmcaeZ9Yo7hjvzP8tmbb",
+        "Accept": "application/json, text/event-stream"
+      }
+    }
+  }
+}

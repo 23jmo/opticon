@@ -1,12 +1,15 @@
 import asyncio
+import base64
 import json
 import logging
 import os
 import sys
+from io import BytesIO
 
 import socketio
 from e2b_desktop import Sandbox
 from dedalus_labs import AsyncDedalus
+from PIL import Image
 
 sys.path.insert(0, os.path.dirname(__file__))
 import e2b_tools
@@ -25,13 +28,20 @@ SYSTEM_PROMPT = (
 
 MODEL = "anthropic/claude-sonnet-4-5-20250929"
 MAX_STEPS = 500
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 2  # seconds
 
 
 def make_screenshot_message():
     """Capture the desktop and return (message_dict, raw_png_bytes)."""
-    import base64
     raw_bytes = e2b_tools.screenshot_raw_bytes()
-    b64 = base64.b64encode(raw_bytes).decode("utf-8")
+
+    # Compress PNG to JPEG for smaller API payloads (~500KB-1MB vs 2-8MB)
+    img = Image.open(BytesIO(raw_bytes))
+    jpeg_buf = BytesIO()
+    img.save(jpeg_buf, format="JPEG", quality=75)
+    jpeg_b64 = base64.b64encode(jpeg_buf.getvalue()).decode("utf-8")
+
     msg = {
         "role": "user",
         "content": [
@@ -39,14 +49,30 @@ def make_screenshot_message():
             {
                 "type": "image_url",
                 "image_url": {
-                    "url": f"data:image/png;base64,{b64}",
+                    "url": f"data:image/jpeg;base64,{jpeg_b64}",
                     "detail": "high",
                 },
             },
             {"type": "text", "text": "What action should you take next?"},
         ],
     }
-    return msg, raw_bytes
+    return msg, raw_bytes  # Still return raw PNG for replay buffer
+
+
+async def call_with_retry(client, **kwargs):
+    """Call client.chat.completions.create() with exponential backoff on failure."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            return await client.chat.completions.create(**kwargs)
+        except Exception as e:
+            if attempt == MAX_RETRIES - 1:
+                raise
+            delay = RETRY_BASE_DELAY * (2 ** attempt)
+            logger.warning(
+                "API error (attempt %d/%d): %s — retrying in %ds",
+                attempt + 1, MAX_RETRIES, e, delay,
+            )
+            await asyncio.sleep(delay)
 
 
 async def run_agent_loop(client, task_description, whiteboard_content="", on_step=None, replay_buffer=None):
@@ -82,7 +108,8 @@ async def run_agent_loop(client, task_description, whiteboard_content="", on_ste
         if replay_buffer is not None:
             replay_buffer.capture_frame(raw_png, last_action_label)
 
-        response = await client.chat.completions.create(
+        response = await call_with_retry(
+            client,
             model=MODEL,
             messages=messages,
             tools=e2b_tools.TOOL_SCHEMAS,
