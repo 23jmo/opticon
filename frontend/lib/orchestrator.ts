@@ -12,7 +12,7 @@ export async function decomposeTasks(
 ): Promise<string[]> {
   const response = await client.chat.completions.create({
     model: "anthropic/claude-sonnet-4-20250514",
-    max_tokens: 1024,
+    max_tokens: 4096,
     messages: [
       {
         role: "system",
@@ -24,7 +24,7 @@ export async function decomposeTasks(
 
 Request: ${prompt.trim()}
 
-Return a JSON object with a "todos" array where each item has a "description" field containing a specific, actionable task.`,
+Return a JSON object with a "todos" array where each item has a "description" field containing a specific, actionable task. Keep each description to 2-3 sentences max.`,
       },
     ],
   });
@@ -33,8 +33,7 @@ Return a JSON object with a "todos" array where each item has a "description" fi
   console.log("[orchestrator] Sonnet response:", text.substring(0, 300));
 
   // Strip markdown code fences if present
-  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  if (fenceMatch) text = fenceMatch[1];
+  text = text.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
 
   const parsed = JSON.parse(text);
   if (!parsed.todos || !Array.isArray(parsed.todos)) {
