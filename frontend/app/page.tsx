@@ -33,11 +33,6 @@ const EXAMPLE_PROMPTS = [
     prompt:
       "Perform a competitive analysis of the top 4 AI coding assistants (GitHub Copilot, Cursor, Claude Code, Windsurf). Each agent should research one tool — gathering pricing, features, user reviews, and limitations. Compile everything into a comparison spreadsheet and a summary document with recommendations.",
   },
-  {
-    label: "Build a website",
-    prompt:
-      "Build a personal portfolio website using HTML, CSS, and JavaScript. It should have a hero section with a name and tagline, an about section, a projects grid with placeholder cards, and a contact form. Use a modern dark theme with smooth scroll animations. Save all files to the desktop.",
-  },
 ];
 
 export default function Home() {
