@@ -13,6 +13,7 @@ from PIL import Image
 
 sys.path.insert(0, os.path.dirname(__file__))
 import e2b_tools
+from memory import MemoryManager
 from replay import ReplayBuffer
 
 logger = logging.getLogger(__name__)
@@ -75,7 +76,7 @@ async def call_with_retry(client, **kwargs):
             await asyncio.sleep(delay)
 
 
-async def run_agent_loop(client, task_description, whiteboard_content="", on_step=None, replay_buffer=None, terminated=None):
+async def run_agent_loop(client, task_description, whiteboard_content="", user_memories="", on_step=None, replay_buffer=None, terminated=None):
     """
     Observe-think-act loop using Dedalus chat.completions.create().
 
@@ -92,6 +93,8 @@ async def run_agent_loop(client, task_description, whiteboard_content="", on_ste
         system_content += (
             f"\n\nShared whiteboard (written by other agents):\n{whiteboard_content}"
         )
+    if user_memories:
+        system_content += f"\n\n{user_memories}"
 
     messages = [
         {"role": "system", "content": system_content},
@@ -185,6 +188,7 @@ async def run_agent_loop(client, task_description, whiteboard_content="", on_ste
 async def main():
     session_id = os.environ["SESSION_ID"]
     agent_id = os.environ["AGENT_ID"]
+    user_id = os.environ.get("USER_ID")
     socket_url = os.environ.get("SOCKET_URL", "http://localhost:3000")
 
     logging.basicConfig(
@@ -242,6 +246,9 @@ async def main():
     replay_buffer = ReplayBuffer()
     r2_public_url = os.environ.get("R2_PUBLIC_URL", "")
 
+    # --- Memory manager (per-user, optional) ---
+    memory_mgr = MemoryManager() if user_id else None
+
     try:
         while not terminated.is_set():
             # Wait for a task or termination signal
@@ -262,6 +269,13 @@ async def main():
             )
             logger.info("Starting task %s: %s", task_id, task_description)
 
+            # Retrieve user memories for context
+            user_memories = ""
+            if memory_mgr and user_id:
+                user_memories = await asyncio.to_thread(
+                    memory_mgr.retrieve_memories, user_id, task_description
+                )
+
             async def on_step(step, name, args, reasoning=None):
                 logger.info("  Step %d: %s(%s)", step, name, args)
                 action_id = f"{agent_id}-{step}-{task_id}"
@@ -281,6 +295,7 @@ async def main():
                 result = await run_agent_loop(
                     client, task_description,
                     whiteboard_content=whiteboard_content,
+                    user_memories=user_memories,
                     on_step=on_step,
                     replay_buffer=replay_buffer,
                     terminated=terminated,
@@ -298,6 +313,12 @@ async def main():
                 "task:completed", {"todoId": task_id, "result": result}
             )
             logger.info("Completed task %s", task_id)
+
+            # Store memories from successful tasks
+            if memory_mgr and user_id and result and not result.startswith("("):
+                await asyncio.to_thread(
+                    memory_mgr.store_memories, user_id, task_description, result
+                )
 
             # Write result to whiteboard
             await emit(

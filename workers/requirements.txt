@@ -2,3 +2,5 @@ dedalus-labs
 e2b-desktop
 Pillow
 python-socketio[asyncio_client]>=5.0.0
+mem0ai>=0.1.0
+sentence-transformers>=2.0.0

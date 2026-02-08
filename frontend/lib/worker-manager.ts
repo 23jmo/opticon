@@ -41,6 +41,7 @@ export function spawnWorkers(sessionId: string, agentCount: number): void {
         ...process.env,
         SESSION_ID: sessionId,
         AGENT_ID: agentId,
+        USER_ID: session.userId || "",
         SOCKET_URL: `http://localhost:${process.env.PORT || "3000"}`,
         E2B_API_KEY: process.env.E2B_API_KEY || "",
         DEDALUS_API_KEY: process.env.DEDALUS_API_KEY || "",

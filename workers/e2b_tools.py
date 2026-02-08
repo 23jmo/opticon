@@ -1,4 +1,5 @@
 import base64
+import time
 
 _sandbox = None
 
@@ -25,6 +26,7 @@ def screenshot_as_base64() -> str:
 def click(x: int, y: int) -> str:
     """Left-click at screen coordinates (x, y)."""
     _sandbox.left_click(x, y)
+    time.sleep(0.1)
     return f"Clicked at ({x}, {y})"
 
 
@@ -40,13 +42,16 @@ def type_text(text: str) -> str:
     for i, part in enumerate(parts):
         if part:
             _sandbox.write(part)
+            time.sleep(0.05)
         if i < len(parts) - 1:
             _sandbox.press("Enter")
+            time.sleep(0.05)
     return f"Typed: {text}"
 
 
 def press_key(key: str) -> str:
     """Press a key or key combo (e.g. 'enter', 'ctrl+c')."""
+    time.sleep(0.1)
     _sandbox.press(key)
     return f"Pressed: {key}"
 
