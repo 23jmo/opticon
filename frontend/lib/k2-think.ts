@@ -135,15 +135,15 @@ export async function decomposeTasksWithK2(
   prompt: string,
   agentCount: number
 ): Promise<string[]> {
-  const systemPrompt = `You are a task decomposition engine. Given a user's prompt, break it down into independent, parallelizable tasks that can each be executed by an AI agent controlling a cloud desktop (browser, file system, etc).
+  const systemPrompt = `Break the user's request into exactly ${agentCount} independent tasks. Each task will be executed by a separate AI agent with access to a cloud desktop (browser, terminal, file system).
 
-Rules:
-- Each task must be independently executable
-- Tasks should be roughly equal in complexity
-- Return ONLY valid JSON: { "todos": [{ "description": "..." }] }
-- Target exactly ${agentCount} tasks (one per available agent)
-- Be specific and actionable in each task description
-- Do NOT include any text before or after the JSON`;
+Respond with ONLY a JSON object in this exact format, no other text:
+{"todos":[{"description":"first task here"},{"description":"second task here"}]}
+
+Requirements:
+- Each task must be specific and actionable
+- Tasks must be independently executable in parallel
+- Tasks should be roughly equal in complexity`;
 
   const response = await callK2Think(systemPrompt, prompt.trim());
   return parseTodosResponse(response);
@@ -157,15 +157,16 @@ export async function refineTasksWithK2(
   currentTasks: string[],
   refinement: string
 ): Promise<string[]> {
-  const systemPrompt = `You are a task refinement engine. Given the original prompt, current task list, and a user refinement request, update the task list accordingly.
+  const systemPrompt = `Update the task list based on the user's refinement request. You may add, remove, or modify tasks.
 
-Rules:
-- Each task must be independently executable
+Respond with ONLY a JSON object in this exact format, no other text:
+{"todos":[{"description":"first task here"},{"description":"second task here"}]}
+
+Requirements:
+- Each task must be specific and actionable
+- Tasks must be independently executable in parallel
 - Tasks should be roughly equal in complexity
-- Return ONLY valid JSON: { "todos": [{ "description": "..." }] }
-- Honor the user's refinement request (add tasks, modify existing ones, remove tasks, etc.)
-- Be specific and actionable in each task description
-- Do NOT include any text before or after the JSON`;
+- Honor the user's refinement request exactly`;
 
   const userPrompt = `Original prompt: ${originalPrompt}
 
