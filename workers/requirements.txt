@@ -1,3 +1,4 @@
 dedalus-labs
 e2b-desktop
+Pillow
 python-socketio[asyncio_client]>=5.0.0

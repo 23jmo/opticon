@@ -16,7 +16,7 @@ import {
   AgentErrorEvent,
   TaskCompletedEvent,
   WhiteboardUpdatedEvent,
-  SessionTasksDoneEvent,
+  ReplayReadyEvent,
 } from "@/lib/types";
 import { createSessionSocket } from "@/lib/socket-client";
 import {
@@ -39,9 +39,7 @@ function SessionContent() {
   const sessionId = params.id as string;
   const isMock = sessionId === "demo";
 
-  const [prompt, setPrompt] = useState(
-    searchParams.get("prompt") || (isMock ? MOCK_PROMPT : "")
-  );
+  const prompt = searchParams.get("prompt") || MOCK_PROMPT;
   const agentCountParam = parseInt(searchParams.get("agents") || "4", 10);
 
   const socketRef = useRef<Socket | null>(null);
@@ -56,21 +54,27 @@ function SessionContent() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [whiteboard, setWhiteboard] = useState<string>("");
   const [sessionComplete, setSessionComplete] = useState(false);
-  const [tasksComplete, setTasksComplete] = useState(false);
-  const [idleSecondsLeft, setIdleSecondsLeft] = useState<number | null>(null);
-  const idleCountdownRef = useRef<NodeJS.Timeout | null>(null);
+  const [tasksDone, setTasksDone] = useState(false);
   const [isLoading, setIsLoading] = useState(!isMock);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"tabs" | "grid">("tabs");
+  const [replays, setReplays] = useState<Record<string, { manifestUrl: string; frameCount: number }>>({});
 
   const handleStop = useCallback(() => {
     if (socketRef.current) {
       socketRef.current.emit("session:stop", { sessionId });
     }
-    // Update all agents to terminated
     setAgents((prev) =>
       prev.map((agent) => ({ ...agent, status: "terminated" as const }))
     );
+    setSessionComplete(true);
+  }, [sessionId]);
+
+  const handleFinish = useCallback(() => {
+    if (socketRef.current) {
+      socketRef.current.emit("session:finish", { sessionId });
+    }
+    setSessionComplete(true);
   }, [sessionId]);
 
   const handleAgentCommand = useCallback(
@@ -90,46 +94,7 @@ function SessionContent() {
     []
   );
 
-  const handleFollowUp = useCallback(
-    (followUpPrompt: string) => {
-      if (socketRef.current) {
-        socketRef.current.emit("session:followup", {
-          sessionId,
-          prompt: followUpPrompt,
-        });
-        // Reset tasks-complete state — agents are working again
-        setTasksComplete(false);
-        setIdleSecondsLeft(null);
-        if (idleCountdownRef.current) {
-          clearInterval(idleCountdownRef.current);
-          idleCountdownRef.current = null;
-        }
-      }
-    },
-    [sessionId]
-  );
-
-  const startIdleCountdown = useCallback(() => {
-    // Clear any existing countdown
-    if (idleCountdownRef.current) {
-      clearInterval(idleCountdownRef.current);
-    }
-    setIdleSecondsLeft(300); // 5 minutes
-    idleCountdownRef.current = setInterval(() => {
-      setIdleSecondsLeft((prev) => {
-        if (prev === null || prev <= 1) {
-          if (idleCountdownRef.current) {
-            clearInterval(idleCountdownRef.current);
-            idleCountdownRef.current = null;
-          }
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }, []);
-
-  // Mock mode: simulate streaming thinking entries
+  // Mock mode: simulate streaming thinking entries + demo replays
   useEffect(() => {
     if (!isMock) return;
 
@@ -150,6 +115,29 @@ function SessionContent() {
       );
     });
 
+    // After 8 seconds, "terminate" agents 1 & 2 and give them mock replays
+    timers.push(
+      setTimeout(() => {
+        setAgents((prev) =>
+          prev.map((a) =>
+            a.id === "agent-001" || a.id === "agent-002"
+              ? { ...a, status: "terminated" as const }
+              : a
+          )
+        );
+        setReplays({
+          "agent-001": {
+            manifestUrl: "/api/replay/mock-manifest?agent=agent-001&frames=20",
+            frameCount: 20,
+          },
+          "agent-002": {
+            manifestUrl: "/api/replay/mock-manifest?agent=agent-002&frames=15",
+            frameCount: 15,
+          },
+        });
+      }, 8000)
+    );
+
     return () => timers.forEach(clearTimeout);
   }, [isMock, agents]);
 
@@ -166,9 +154,6 @@ function SessionContent() {
             router.push(`/session/${sessionId}/approve`);
             return;
           }
-          if (data.prompt) {
-            setPrompt(data.prompt);
-          }
           if (data.agents) {
             setAgents(data.agents);
             if (data.agents.length > 0) {
@@ -182,7 +167,8 @@ function SessionContent() {
             setWhiteboard(data.whiteboard);
           }
           if (data.status === "completed") {
-            router.replace(`/session/${sessionId}/summary`);
+            setSessionComplete(true);
+            setIsLoading(false);
             return;
           }
         }
@@ -222,13 +208,18 @@ function SessionContent() {
       });
 
       socket.on("task:completed", (data: TaskCompletedEvent) => {
-        setTodos((prev) =>
-          prev.map((t) =>
+        setTodos((prev) => {
+          const updated = prev.map((t) =>
             t.id === data.todoId
               ? { ...t, status: "completed" as const, result: data.result }
               : t
-          )
-        );
+          );
+          // Check if all tasks are now done
+          if (updated.length > 0 && updated.every((t) => t.status === "completed")) {
+            setTasksDone(true);
+          }
+          return updated;
+        });
         setAgents((prev) =>
           prev.map((a) =>
             a.id === data.agentId
@@ -270,11 +261,13 @@ function SessionContent() {
 
       socket.on("agent:thinking", (data: AgentThinkingEvent) => {
         const entry: ThinkingEntry = {
-          id: `${data.agentId}-${Date.now()}-${Math.random()}`,
+          id: data.actionId || `${data.agentId}-${Date.now()}-${Math.random()}`,
           agentId: data.agentId,
           timestamp: data.timestamp,
           action: data.action,
           isError: data.isError,
+          toolName: data.toolName,
+          toolArgs: data.toolArgs,
         };
         setThinkingEntries((prev) => [...prev, entry]);
       });
@@ -350,14 +343,22 @@ function SessionContent() {
         setWhiteboard(data.content);
       });
 
-      socket.on("session:tasks_done", (_data: SessionTasksDoneEvent) => {
-        setTasksComplete(true);
-        startIdleCountdown();
+      socket.on("replay:ready", (data: ReplayReadyEvent) => {
+        setReplays((prev) => ({
+          ...prev,
+          [data.agentId]: {
+            manifestUrl: data.manifestUrl,
+            frameCount: data.frameCount,
+          },
+        }));
+      });
+
+      socket.on("session:tasks_done", () => {
+        setTasksDone(true);
       });
 
       socket.on("session:complete", () => {
         setSessionComplete(true);
-        router.replace(`/session/${sessionId}/summary`);
       });
 
       setIsLoading(false);
@@ -370,12 +371,8 @@ function SessionContent() {
         socketRef.current.disconnect();
         socketRef.current = null;
       }
-      if (idleCountdownRef.current) {
-        clearInterval(idleCountdownRef.current);
-        idleCountdownRef.current = null;
-      }
     };
-  }, [sessionId, isMock, router, startIdleCountdown]);
+  }, [sessionId, isMock, router]);
 
   if (isLoading) {
     return (
@@ -421,26 +418,32 @@ function SessionContent() {
 
   return (
     <div className="flex h-screen flex-col">
-      {/* Tasks-done banner (agents idle, waiting for follow-up) */}
-      {tasksComplete && (
+      {/* Completion banner */}
+      {sessionComplete && (
         <div className="shrink-0 border-b border-emerald-500/20 bg-emerald-500/10 px-5 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <p className="text-sm text-emerald-400 font-medium">
-              All tasks completed
-            </p>
-            {idleSecondsLeft !== null && idleSecondsLeft > 0 && (
-              <span className="text-xs text-emerald-400/70">
-                Agents idle &mdash;{" "}
-                {Math.floor(idleSecondsLeft / 60)}:
-                {String(idleSecondsLeft % 60).padStart(2, "0")} remaining
-              </span>
-            )}
-          </div>
+          <p className="text-sm text-emerald-400 font-medium">
+            Session finished
+          </p>
           <button
             onClick={() => router.push(`/session/${sessionId}/summary`)}
             className="text-sm text-emerald-400 hover:text-emerald-300 font-medium transition-colors"
           >
             View Summary
+          </button>
+        </div>
+      )}
+
+      {/* Tasks done banner (all tasks complete, agents still alive for follow-ups) */}
+      {tasksDone && !sessionComplete && (
+        <div className="shrink-0 border-b border-emerald-500/20 bg-emerald-500/10 px-5 py-3 flex items-center justify-between">
+          <p className="text-sm text-emerald-400 font-medium">
+            All tasks completed — agents are standing by for follow-up instructions
+          </p>
+          <button
+            onClick={handleFinish}
+            className="text-sm text-emerald-400 hover:text-emerald-300 font-medium transition-colors border border-emerald-500/30 rounded-md px-3 py-1"
+          >
+            Finish Session
           </button>
         </div>
       )}
@@ -451,8 +454,13 @@ function SessionContent() {
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         onStop={handleStop}
-        tasksComplete={tasksComplete}
-        onFollowUp={handleFollowUp}
+        tasksComplete={tasksDone || sessionComplete}
+        onFollowUp={(text) => {
+          if (socketRef.current) {
+            socketRef.current.emit("session:followup", { sessionId, prompt: text });
+            setTasksDone(false);
+          }
+        }}
       />
 
       {/* Main content: browser/grid + thinking sidebar */}
@@ -468,6 +476,7 @@ function SessionContent() {
               sessionId={sessionId}
               whiteboard={whiteboard}
               onAgentCommand={handleAgentCommand}
+              replays={replays}
             />
           ) : (
             <AgentGrid
@@ -484,7 +493,6 @@ function SessionContent() {
           <ThinkingSidebar
             entries={thinkingEntries}
             agents={agents}
-            agentActivities={MOCK_AGENT_ACTIVITIES}
             activeAgentId={activeTab}
           />
         </div>

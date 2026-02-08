@@ -1,8 +1,10 @@
 "use client";
 
+import { useRef, useEffect } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Trash2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import type { Todo } from "@/lib/types";
 
 interface KanbanTaskCardProps {
@@ -27,55 +29,73 @@ export function KanbanTaskCard({
     isDragging,
   } = useSortable({ id: task.id });
 
-  const style = {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const sortableStyle = {
     transform: CSS.Transform.toString(transform),
     transition,
+  };
+
+  // Auto-resize textarea on mount and when value changes
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = "auto";
+      textarea.style.height = textarea.scrollHeight + "px";
+    }
+  }, [task.description]);
+
+  const handleInput = (e: React.FormEvent<HTMLTextAreaElement>) => {
+    const target = e.target as HTMLTextAreaElement;
+    target.style.height = "auto";
+    target.style.height = target.scrollHeight + "px";
   };
 
   return (
     <div
       ref={setNodeRef}
-      style={style}
       {...attributes}
       {...listeners}
-      className={`group flex items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2.5 cursor-grab active:cursor-grabbing ${
-        isDragging ? "ring-2 ring-primary/30 opacity-80" : ""
-      } ${overlay ? "shadow-xl shadow-black/40 ring-2 ring-primary/30" : ""}`}
+      className={cn(
+        "group rounded-lg bg-zinc-800/60 px-3.5 py-3 cursor-grab active:cursor-grabbing transition-all",
+        isDragging && "opacity-50",
+        overlay && "shadow-lg shadow-black/50"
+      )}
+      style={{
+        ...sortableStyle,
+        boxShadow: overlay
+          ? undefined
+          : "rgba(0,0,0,0.4) 0px 0px 0px 1px, rgba(0,0,0,0.2) 0px 2px 4px",
+      }}
     >
-      {/* Checkbox */}
-      <div className="mt-1 shrink-0">
-        <div className="size-4 rounded-full border-2 border-zinc-700 bg-zinc-900/40" />
-      </div>
-
-      {/* Task text */}
+      {/* Task text — auto-expanding textarea */}
       <textarea
+        ref={textareaRef}
         value={task.description}
         onChange={(e) => onUpdate(e.target.value)}
+        onInput={handleInput}
         onMouseDown={(e) => e.stopPropagation()}
         onTouchStart={(e) => e.stopPropagation()}
-        className="flex-1 bg-transparent text-sm text-zinc-200 resize-none outline-none placeholder:text-zinc-600 leading-relaxed"
+        className="w-full bg-transparent text-sm text-zinc-200 resize-none outline-none placeholder:text-zinc-600 leading-relaxed"
         placeholder="Describe the task..."
         rows={1}
-        style={{ height: 'auto', minHeight: '20px' }}
-        onInput={(e) => {
-          const target = e.target as HTMLTextAreaElement;
-          target.style.height = 'auto';
-          target.style.height = target.scrollHeight + 'px';
-        }}
+        style={{ minHeight: "20px" }}
       />
 
-      {/* Delete button */}
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onRemove();
-        }}
-        onMouseDown={(e) => e.stopPropagation()}
-        onTouchStart={(e) => e.stopPropagation()}
-        className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-destructive transition-all mt-1 shrink-0"
-      >
-        <Trash2 className="size-3.5" />
-      </button>
+      {/* Delete — bottom right, only on hover */}
+      <div className="flex justify-end mt-1">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 transition-all"
+        >
+          <Trash2 className="size-3" />
+        </button>
+      </div>
     </div>
   );
 }

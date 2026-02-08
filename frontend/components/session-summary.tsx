@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Task, Agent } from "@/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { CheckCircle2, ArrowLeft } from "lucide-react";
+import { ReplayScrubber } from "./replay-scrubber";
 
 interface SessionSummaryProps {
   sessionId: string;
@@ -24,6 +26,23 @@ export function SessionSummary({
   whiteboard,
 }: SessionSummaryProps) {
   const router = useRouter();
+  const [replays, setReplays] = useState<Record<string, { manifestUrl: string; frameCount: number }>>({});
+
+  // Fetch replays on mount
+  useEffect(() => {
+    fetch(`/api/replay/${sessionId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data?.replays) return;
+        const map: Record<string, { manifestUrl: string; frameCount: number }> = {};
+        for (const r of data.replays) {
+          map[r.agentId] = { manifestUrl: r.manifestUrl, frameCount: r.frameCount };
+        }
+        setReplays(map);
+      })
+      .catch(() => {});
+  }, [sessionId]);
+
   const completedTasks = tasks.filter((t) => t.status === "completed");
   const tasksByAgent = agents.reduce(
     (acc, agent) => {
@@ -97,7 +116,7 @@ export function SessionSummary({
                     </Badge>
                   </div>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-3">
                   {agentTasks.length > 0 ? (
                     <ul className="space-y-2">
                       {agentTasks.map((task) => (
@@ -118,6 +137,14 @@ export function SessionSummary({
                     <p className="text-xs text-muted-foreground/60">
                       No tasks completed
                     </p>
+                  )}
+                  {replays[agent.id] && (
+                    <div className="h-48 rounded-lg overflow-hidden border border-border">
+                      <ReplayScrubber
+                        manifestUrl={replays[agent.id].manifestUrl}
+                        agentLabel={`Agent ${agent.id.slice(0, 6)}`}
+                      />
+                    </div>
                   )}
                 </CardContent>
               </Card>

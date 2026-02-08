@@ -62,3 +62,16 @@ export const todos = pgTable("todos", {
   assignedTo: text("assigned_to"),
   result: text("result"),
 });
+
+export const replays = pgTable("replays", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  sessionId: text("session_id")
+    .notNull()
+    .references(() => sessions.id, { onDelete: "cascade" }),
+  agentId: text("agent_id").notNull(),
+  manifestUrl: text("manifest_url").notNull(),
+  frameCount: integer("frame_count").notNull(),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+});

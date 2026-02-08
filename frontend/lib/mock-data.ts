@@ -12,10 +12,10 @@ export const MOCK_PROMPT =
   "Write a comprehensive research paper on Google Docs about the rise of Daedalus Labs and their impact on AI agent development, including market analysis and technical architecture review";
 
 export const MOCK_AGENTS: Agent[] = [
-  { id: "agent-001", sessionId: "demo", status: "active", currentTaskId: null },
-  { id: "agent-002", sessionId: "demo", status: "active", currentTaskId: null },
-  { id: "agent-003", sessionId: "demo", status: "active", currentTaskId: null },
-  { id: "agent-004", sessionId: "demo", status: "booting", currentTaskId: null },
+  { id: "agent-001", name: "Agent 1", sessionId: "demo", status: "active", currentTaskId: null },
+  { id: "agent-002", name: "Agent 2", sessionId: "demo", status: "active", currentTaskId: null },
+  { id: "agent-003", name: "Agent 3", sessionId: "demo", status: "active", currentTaskId: null },
+  { id: "agent-004", name: "Agent 4", sessionId: "demo", status: "booting", currentTaskId: null },
 ];
 
 export const MOCK_AGENT_ACTIVITIES: Record<string, AgentActivity> = {
@@ -57,6 +57,8 @@ export const MOCK_THINKING_ENTRIES: ThinkingEntry[] = [
     agentId: "agent-001",
     timestamp: new Date(now - 50000).toISOString(),
     action: "Opening Chrome browser",
+    reasoning:
+      "I need to start by opening a web browser so I can access Google Scholar and other academic databases for the research paper.",
     toolName: "click",
     toolArgs: { x: 48, y: 720, element: "Chrome icon" },
   },
@@ -65,6 +67,8 @@ export const MOCK_THINKING_ENTRIES: ThinkingEntry[] = [
     agentId: "agent-002",
     timestamp: new Date(now - 48000).toISOString(),
     action: "Opening Google Docs",
+    reasoning:
+      "I should set up the document workspace first so the other agents can contribute their findings as they complete research.",
     toolName: "click",
     toolArgs: { x: 312, y: 245, element: "Google Docs shortcut" },
   },
@@ -101,16 +105,10 @@ export const MOCK_THINKING_ENTRIES: ThinkingEntry[] = [
     agentId: "agent-001",
     timestamp: new Date(now - 36000).toISOString(),
     action: 'Searching for "Daedalus Labs AI agents multi-agent systems"',
+    reasoning:
+      "I'll combine the company name with technical terms like 'multi-agent systems' to find the most relevant academic literature and technical papers.",
     toolName: "type_text",
     toolArgs: { text: "Daedalus Labs AI agents multi-agent systems" },
-  },
-  {
-    id: "t-001-3b",
-    agentId: "agent-001",
-    timestamp: new Date(now - 35500).toISOString(),
-    action: "Submitting search query",
-    toolName: "press_key",
-    toolArgs: { key: "Enter" },
   },
   {
     id: "t-003-2",
@@ -127,6 +125,8 @@ export const MOCK_THINKING_ENTRIES: ThinkingEntry[] = [
     agentId: "agent-002",
     timestamp: new Date(now - 30000).toISOString(),
     action: 'Setting document title: "The Rise of Daedalus Labs"',
+    reasoning:
+      "A clear, professional title sets the tone for the paper. 'The Rise of Daedalus Labs' captures both the narrative arc and the company focus.",
     toolName: "type_text",
     toolArgs: { text: "The Rise of Daedalus Labs" },
   },
@@ -145,6 +145,8 @@ export const MOCK_THINKING_ENTRIES: ThinkingEntry[] = [
     agentId: "agent-003",
     timestamp: new Date(now - 22000).toISOString(),
     action: "Analyzing Daedalus Labs GitHub repositories",
+    reasoning:
+      "Examining their public repositories will reveal their technical architecture choices, commit velocity, and how actively they maintain their open-source tools.",
     toolName: "type_text",
     toolArgs: { text: "python analyze_repos.py --org daedalus-labs" },
   },
@@ -171,26 +173,12 @@ export const MOCK_THINKING_ENTRIES: ThinkingEntry[] = [
     toolArgs: { text: "python generate_charts.py" },
   },
   {
-    id: "t-001-5",
-    agentId: "agent-001",
-    timestamp: new Date(now - 12000).toISOString(),
-    action: "Scrolling through research paper",
-    toolName: "scroll",
-    toolArgs: { direction: "down", amount: 5 },
-  },
-  {
     id: "t-004-1",
     agentId: "agent-004",
     timestamp: new Date(now - 10000).toISOString(),
     action: "Initializing desktop environment",
-  },
-  {
-    id: "t-002-5",
-    agentId: "agent-002",
-    timestamp: new Date(now - 8000).toISOString(),
-    action: "Moving cursor to outline section",
-    toolName: "move_mouse",
-    toolArgs: { x: 400, y: 520 },
+    reasoning:
+      "My desktop sandbox is booting up. Once the other agents finish their research and writing, I'll review the final document for coherence and accuracy.",
   },
   {
     id: "t-001-6",

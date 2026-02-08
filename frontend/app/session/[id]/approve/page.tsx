@@ -211,16 +211,14 @@ export default function ApprovePage() {
 
           {/* Kanban board */}
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 overflow-hidden">
-            <div className="max-h-[500px] overflow-y-auto">
-              <KanbanBoard
-                initialTasks={tasks}
-                initialAgentCount={agentCount}
-                onApprove={handleApprove}
-                isApproving={isApproving}
-                onCancel={handleCancel}
-                maxAgents={maxAgents}
-              />
-            </div>
+            <KanbanBoard
+              initialTasks={tasks}
+              initialAgentCount={agentCount}
+              onApprove={handleApprove}
+              isApproving={isApproving}
+              onCancel={handleCancel}
+              maxAgents={maxAgents}
+            />
           </div>
 
           <UpgradeModal

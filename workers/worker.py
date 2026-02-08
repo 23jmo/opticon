@@ -1,15 +1,19 @@
 import asyncio
+import base64
 import json
 import logging
 import os
 import sys
+from io import BytesIO
 
 import socketio
 from e2b_desktop import Sandbox
 from dedalus_labs import AsyncDedalus
+from PIL import Image
 
 sys.path.insert(0, os.path.dirname(__file__))
 import e2b_tools
+from replay import ReplayBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -24,28 +28,54 @@ SYSTEM_PROMPT = (
 
 MODEL = "anthropic/claude-sonnet-4-5-20250929"
 MAX_STEPS = 500
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 2  # seconds
 
 
 def make_screenshot_message():
-    """Capture the desktop and return a user message with the image."""
-    b64 = e2b_tools.screenshot_as_base64()
-    return {
+    """Capture the desktop and return (message_dict, raw_png_bytes)."""
+    raw_bytes = e2b_tools.screenshot_raw_bytes()
+
+    # Compress PNG to JPEG for smaller API payloads (~500KB-1MB vs 2-8MB)
+    img = Image.open(BytesIO(raw_bytes))
+    jpeg_buf = BytesIO()
+    img.save(jpeg_buf, format="JPEG", quality=75)
+    jpeg_b64 = base64.b64encode(jpeg_buf.getvalue()).decode("utf-8")
+
+    msg = {
         "role": "user",
         "content": [
             {"type": "text", "text": "Here is the current screenshot of the desktop:"},
             {
                 "type": "image_url",
                 "image_url": {
-                    "url": f"data:image/png;base64,{b64}",
+                    "url": f"data:image/jpeg;base64,{jpeg_b64}",
                     "detail": "high",
                 },
             },
             {"type": "text", "text": "What action should you take next?"},
         ],
     }
+    return msg, raw_bytes  # Still return raw PNG for replay buffer
 
 
-async def run_agent_loop(client, task_description, whiteboard_content="", on_step=None):
+async def call_with_retry(client, **kwargs):
+    """Call client.chat.completions.create() with exponential backoff on failure."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            return await client.chat.completions.create(**kwargs)
+        except Exception as e:
+            if attempt == MAX_RETRIES - 1:
+                raise
+            delay = RETRY_BASE_DELAY * (2 ** attempt)
+            logger.warning(
+                "API error (attempt %d/%d): %s — retrying in %ds",
+                attempt + 1, MAX_RETRIES, e, delay,
+            )
+            await asyncio.sleep(delay)
+
+
+async def run_agent_loop(client, task_description, whiteboard_content="", on_step=None, replay_buffer=None):
     """
     Observe-think-act loop using Dedalus chat.completions.create().
 
@@ -67,11 +97,19 @@ async def run_agent_loop(client, task_description, whiteboard_content="", on_ste
         {"role": "user", "content": f"Your task: {task_description}"},
     ]
 
+    last_action_label = "Starting task"
+
     for step in range(MAX_STEPS):
         # Observe: take screenshot and show it to the model
-        messages.append(make_screenshot_message())
+        screenshot_msg, raw_png = make_screenshot_message()
+        messages.append(screenshot_msg)
 
-        response = await client.chat.completions.create(
+        # Capture frame for replay
+        if replay_buffer is not None:
+            replay_buffer.capture_frame(raw_png, last_action_label)
+
+        response = await call_with_retry(
+            client,
             model=MODEL,
             messages=messages,
             tools=e2b_tools.TOOL_SCHEMAS,
@@ -95,6 +133,20 @@ async def run_agent_loop(client, task_description, whiteboard_content="", on_ste
             ],
         })
 
+        # Extract reasoning from assistant message content (Claude's thinking)
+        reasoning = None
+        if msg.content:
+            if isinstance(msg.content, str):
+                reasoning = msg.content.strip() or None
+            elif isinstance(msg.content, list):
+                text_parts = [
+                    block.get("text", "") if isinstance(block, dict) else str(block)
+                    for block in msg.content
+                    if (isinstance(block, dict) and block.get("type") == "text") or isinstance(block, str)
+                ]
+                combined = " ".join(text_parts).strip()
+                reasoning = combined or None
+
         if not msg.tool_calls:
             return msg.content or "(no response)"
 
@@ -107,7 +159,9 @@ async def run_agent_loop(client, task_description, whiteboard_content="", on_ste
             args = {}
 
         if on_step:
-            await on_step(step + 1, name, args)
+            await on_step(step + 1, name, args, reasoning)
+
+        last_action_label = f"Tool: {name}"
 
         result = e2b_tools.execute_tool(name, args)
 
@@ -178,6 +232,10 @@ async def main():
     # --- Init Daedalus client ---
     client = AsyncDedalus()
 
+    # --- Replay buffer ---
+    replay_buffer = ReplayBuffer()
+    r2_public_url = os.environ.get("R2_PUBLIC_URL", "")
+
     try:
         while not terminated.is_set():
             # Wait for a task or termination signal
@@ -198,18 +256,27 @@ async def main():
             )
             logger.info("Starting task %s: %s", task_id, task_description)
 
-            async def on_step(step, name, args):
+            async def on_step(step, name, args, reasoning=None):
                 logger.info("  Step %d: %s(%s)", step, name, args)
+                action_id = f"{agent_id}-{step}-{task_id}"
                 await emit("agent:thinking", {
                     "action": f"Tool: {name}",
-                    "detail": json.dumps(args),
+                    "actionId": action_id,
+                    "toolName": name,
+                    "toolArgs": args,
                 })
+                if reasoning:
+                    await emit("agent:reasoning", {
+                        "reasoning": reasoning,
+                        "actionId": action_id,
+                    })
 
             try:
                 result = await run_agent_loop(
                     client, task_description,
                     whiteboard_content=whiteboard_content,
                     on_step=on_step,
+                    replay_buffer=replay_buffer,
                 )
             except Exception as e:
                 result = f"Error: {e}"
@@ -232,6 +299,22 @@ async def main():
             )
 
     finally:
+        # Upload replay frames before killing sandbox
+        if replay_buffer.frame_count > 0 and r2_public_url:
+            try:
+                upload_result = await replay_buffer.upload(
+                    session_id, agent_id, socket_url, r2_public_url
+                )
+                if upload_result:
+                    manifest_url, frame_count = upload_result
+                    await emit("replay:complete", {
+                        "manifestUrl": manifest_url,
+                        "frameCount": frame_count,
+                    })
+                    logger.info("Replay uploaded: %d frames", frame_count)
+            except Exception as e:
+                logger.error("Failed to upload replay: %s", e)
+
         if desktop:
             desktop.kill()
         await emit("agent:terminated", {})

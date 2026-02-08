@@ -11,9 +11,14 @@ def init(sandbox):
 
 # --- Tool functions (called by the agentic loop) ---
 
+def screenshot_raw_bytes() -> bytes:
+    """Take a screenshot and return raw PNG bytes."""
+    return _sandbox.screenshot()
+
+
 def screenshot_as_base64() -> str:
     """Take a screenshot and return base64-encoded PNG."""
-    img_bytes = _sandbox.screenshot()
+    img_bytes = screenshot_raw_bytes()
     return base64.b64encode(img_bytes).decode("utf-8")
 
 
