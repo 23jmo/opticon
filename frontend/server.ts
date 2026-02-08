@@ -44,8 +44,13 @@ const handler = app.getRequestHandler();
 
 /** 5-minute idle shutdown timers, keyed by sessionId */
 const idleTimers = new Map<string, NodeJS.Timeout>();
+/** Safety timers for sessions being stopped, keyed by sessionId */
+const stopTimers = new Map<string, NodeJS.Timeout>();
+/** Sessions waiting for workers to finish cleanup before completing */
+const stoppingSessions = new Set<string>();
 
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const STOP_TIMEOUT_MS = 30 * 1000; // 30 seconds max wait for worker cleanup
 
 app.prepare().then(() => {
   const httpServer = createServer(handler);
@@ -114,6 +119,41 @@ app.prepare().then(() => {
   }
 
   /**
+   * Complete a session that was stopped by the user, after workers have
+   * finished saving replays (or the safety timeout fired).
+   */
+  function completeStoppedSession(sessionId: string): void {
+    stoppingSessions.delete(sessionId);
+    const existingTimeout = stopTimers.get(sessionId);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+      stopTimers.delete(sessionId);
+    }
+
+    const session = getSession(sessionId);
+    if (!session) return;
+
+    // Mark any remaining agents as terminated
+    session.agents.forEach((agent) => {
+      if (agent.status !== "terminated") {
+        updateAgentStatus(sessionId, agent.id, "terminated");
+        io.to(`session:${sessionId}`).emit("agent:terminated", {
+          agentId: agent.id,
+        });
+      }
+    });
+
+    session.status = "completed";
+    io.to(`session:${sessionId}`).emit("session:complete", { sessionId });
+
+    persistSessionStatus(sessionId, "completed", new Date()).catch(
+      console.error
+    );
+
+    console.log(`[server] Session ${sessionId} — stopped session completed`);
+  }
+
+  /**
    * Assign tasks to idle agents in a session. Used both after initial
    * stream_ready and after follow-up decomposition.
    */
@@ -170,28 +210,23 @@ app.prepare().then(() => {
       // Clear any idle timer
       clearIdleTimer(sessionId);
 
-      // Mark all agents as terminated
-      session.agents.forEach((agent) => {
-        updateAgentStatus(sessionId, agent.id, "terminated");
-      });
+      // Track that this session is stopping — workers need time to save replays
+      stoppingSessions.add(sessionId);
 
-      // Tell all workers to stop
+      // Tell all workers to stop (they'll save replays in their finally block)
       io.to(`session:${sessionId}`).emit("task:none");
 
-      // Notify browser clients
-      session.agents.forEach((agent) => {
-        io.to(`session:${sessionId}`).emit("agent:terminated", {
-          agentId: agent.id,
-        });
-      });
+      // Safety timeout: if workers don't finish in time, force-complete
+      const timeout = setTimeout(() => {
+        stopTimers.delete(sessionId);
+        if (stoppingSessions.has(sessionId)) {
+          console.log(`[server] Session ${sessionId} — stop timeout, force-completing`);
+          completeStoppedSession(sessionId);
+        }
+      }, STOP_TIMEOUT_MS);
+      stopTimers.set(sessionId, timeout);
 
-      // Mark session as failed (user-stopped)
-      session.status = "failed";
-      persistSessionStatus(sessionId, "failed", new Date()).catch(
-        console.error
-      );
-
-      console.log(`[server] Session ${sessionId} stopped by user`);
+      console.log(`[server] Session ${sessionId} — waiting for workers to save replays`);
     });
 
     socket.on("session:finish", (data: { sessionId: string }) => {
@@ -423,8 +458,14 @@ app.prepare().then(() => {
         agentId: data.agentId,
       });
 
-      // Don't trigger completion from agent termination — agents now stay alive.
-      // Session completion is handled by the idle timer.
+      // If session is being stopped, check if all agents are now terminated
+      if (stoppingSessions.has(sessionId)) {
+        const session = getSession(sessionId);
+        if (session && session.agents.every((a) => a.status === "terminated")) {
+          console.log(`[server] Session ${sessionId} — all agents terminated, completing`);
+          completeStoppedSession(sessionId);
+        }
+      }
     });
 
     socket.on("disconnect", () => {

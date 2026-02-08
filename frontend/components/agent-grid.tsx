@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Agent } from "@/lib/types";
 import { AgentActivity } from "@/lib/mock-data";
 import { AgentScreen } from "./agent-screen";
+import { VMTab } from "./vm-tab";
 import { Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -14,6 +15,7 @@ interface AgentGridProps {
   agentActivities: Record<string, AgentActivity>;
   onSelectAgent: (agentId: string) => void;
   onAgentCommand?: (agentId: string, message: string) => void;
+  sessionId?: string;
 }
 
 export function AgentGrid({
@@ -21,7 +23,9 @@ export function AgentGrid({
   agentActivities,
   onSelectAgent,
   onAgentCommand,
+  sessionId,
 }: AgentGridProps) {
+  const isMock = sessionId === "demo";
   const gridCols =
     agents.length <= 1
       ? "grid-cols-1"
@@ -38,6 +42,8 @@ export function AgentGrid({
           activity={agentActivities[agent.id]}
           onSelect={() => onSelectAgent(agent.id)}
           onCommand={(message) => onAgentCommand?.(agent.id, message)}
+          isMock={isMock}
+          sessionId={sessionId}
         />
       ))}
     </div>
@@ -49,6 +55,8 @@ interface AgentGridCellProps {
   activity: AgentActivity;
   onSelect: () => void;
   onCommand: (message: string) => void;
+  isMock: boolean;
+  sessionId?: string;
 }
 
 function AgentGridCell({
@@ -56,6 +64,8 @@ function AgentGridCell({
   activity,
   onSelect,
   onCommand,
+  isMock,
+  sessionId,
 }: AgentGridCellProps) {
   const [chatInput, setChatInput] = useState("");
 
@@ -68,12 +78,17 @@ function AgentGridCell({
 
   return (
     <div className="flex flex-col rounded-lg border border-border bg-muted/30 overflow-hidden">
-      {/* Agent label overlay — clickable to switch to tab view */}
-      <button
-        onClick={onSelect}
-        className="relative flex-1 overflow-hidden group cursor-pointer"
-      >
-        <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5 rounded-md bg-black/60 backdrop-blur-sm px-2 py-1">
+      {/* Stream area — positioned container for VMTab */}
+      <div className="relative flex-1 overflow-hidden">
+        {/* Clickable overlay — above VMTab's z-20 non-interactive overlay */}
+        <button
+          onClick={onSelect}
+          className="absolute inset-0 z-30 cursor-pointer"
+          aria-label={`View ${activity?.label || agent.name} in full screen`}
+        />
+
+        {/* Agent label */}
+        <div className="absolute top-2 left-2 z-30 flex items-center gap-1.5 rounded-md bg-black/60 backdrop-blur-sm px-2 py-1 pointer-events-none">
           <span
             className={cn(
               "size-1.5 rounded-full shrink-0",
@@ -88,14 +103,24 @@ function AgentGridCell({
             {activity?.label || agent.name}
           </span>
         </div>
-        <div className="h-full group-hover:opacity-90 transition-opacity">
+
+        {/* Stream or mock screen */}
+        {!isMock && agent.streamUrl ? (
+          <VMTab
+            agentId={agent.id}
+            sessionId={sessionId || ""}
+            streamUrl={agent.streamUrl}
+            isActive={true}
+            isInteractive={false}
+          />
+        ) : (
           <AgentScreen
             agentId={agent.id}
             activity={activity}
             status={agent.status}
           />
-        </div>
-      </button>
+        )}
+      </div>
 
       {/* Compact chat input */}
       <div className="shrink-0 border-t border-border bg-card px-2 py-1.5">

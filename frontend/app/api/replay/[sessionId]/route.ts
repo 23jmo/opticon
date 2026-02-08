@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionReplays } from "@/lib/db/replay-persist";
+import { getSessionReplays, scanLocalReplays } from "@/lib/db/replay-persist";
 
 export async function GET(
   _request: Request,
@@ -7,7 +7,15 @@ export async function GET(
 ) {
   try {
     const { sessionId } = await params;
-    const replayRecords = await getSessionReplays(sessionId);
+    let replayRecords = await getSessionReplays(sessionId);
+
+    // Fallback: scan local .replays/ directory when DB has no records
+    if (replayRecords.length === 0) {
+      const localReplays = await scanLocalReplays(sessionId);
+      if (localReplays.length > 0) {
+        return NextResponse.json({ replays: localReplays });
+      }
+    }
 
     return NextResponse.json({
       replays: replayRecords.map((r) => ({

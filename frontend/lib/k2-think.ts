@@ -114,17 +114,53 @@ export async function callK2Think(
 }
 
 /**
- * Parse a K2 Think response, extracting the todos JSON.
+ * Parse a K2 Think response, extracting task descriptions.
+ * Handles multiple response shapes the model may produce:
+ *   - { "todos": [{ "description": "..." }, ...] }
+ *   - { "tasks": [{ "description": "..." }, ...] }
+ *   - { "tasks": ["...", ...] }
+ *   - { "todos": ["...", ...] }
+ *   - [{ "description": "..." }, ...]
+ *   - { "description": "..." }   (single task)
  */
 function parseTodosResponse(response: string): string[] {
   const json = extractJSON(response);
-  console.log("[K2 Think] Extracted JSON:", json.substring(0, 200));
+  console.log("[K2 Think] Extracted JSON:", json.substring(0, 300));
 
   const parsed = JSON.parse(json);
-  if (!parsed.todos || !Array.isArray(parsed.todos)) {
-    throw new Error("Response missing 'todos' array");
+
+  // Try to find an array of tasks under common keys
+  const arr = parsed.todos ?? parsed.tasks ?? parsed.items ?? parsed.subtasks;
+
+  if (Array.isArray(arr) && arr.length > 0) {
+    return arr.map((item: unknown) => {
+      if (typeof item === "string") return item;
+      if (typeof item === "object" && item !== null) {
+        const obj = item as Record<string, unknown>;
+        return String(obj.description ?? obj.task ?? obj.text ?? obj.name ?? JSON.stringify(obj));
+      }
+      return String(item);
+    });
   }
-  return parsed.todos.map((t: { description: string }) => t.description);
+
+  // Top-level array (no wrapper object)
+  if (Array.isArray(parsed)) {
+    return parsed.map((item: unknown) => {
+      if (typeof item === "string") return item;
+      if (typeof item === "object" && item !== null) {
+        const obj = item as Record<string, unknown>;
+        return String(obj.description ?? obj.task ?? obj.text ?? obj.name ?? JSON.stringify(obj));
+      }
+      return String(item);
+    });
+  }
+
+  // Single task object: { "description": "..." }
+  if (parsed.description && typeof parsed.description === "string") {
+    return [parsed.description];
+  }
+
+  throw new Error("Could not extract task list from response: " + json.substring(0, 200));
 }
 
 /**

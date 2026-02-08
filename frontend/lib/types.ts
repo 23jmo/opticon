@@ -10,6 +10,7 @@ export type AgentStatus =
   | "active"
   | "idle"
   | "error"
+  | "stopping"
   | "terminated";
 
 export interface Todo {

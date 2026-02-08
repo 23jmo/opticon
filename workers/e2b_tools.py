@@ -35,8 +35,13 @@ def double_click(x: int, y: int) -> str:
 
 
 def type_text(text: str) -> str:
-    """Type the given text string."""
-    _sandbox.write(text)
+    """Type the given text string. Newlines are typed as Enter key presses."""
+    parts = text.split("\n")
+    for i, part in enumerate(parts):
+        if part:
+            _sandbox.write(part)
+        if i < len(parts) - 1:
+            _sandbox.press("Enter")
     return f"Typed: {text}"
 
 

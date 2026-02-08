@@ -59,15 +59,23 @@ function SessionContent() {
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"tabs" | "grid">("tabs");
   const [replays, setReplays] = useState<Record<string, { manifestUrl: string; frameCount: number }>>({});
+  const [isStopping, setIsStopping] = useState(false);
 
   const handleStop = useCallback(() => {
     if (socketRef.current) {
       socketRef.current.emit("session:stop", { sessionId });
     }
+    // Mark agents as stopping — don't set sessionComplete yet.
+    // Workers need time to save replays before the session is truly done.
+    // session:complete will arrive from the server once all workers finish.
+    setIsStopping(true);
     setAgents((prev) =>
-      prev.map((agent) => ({ ...agent, status: "terminated" as const }))
+      prev.map((agent) =>
+        agent.status === "terminated"
+          ? agent
+          : { ...agent, status: "stopping" as const }
+      )
     );
-    setSessionComplete(true);
   }, [sessionId]);
 
   const handleFinish = useCallback(() => {
@@ -269,7 +277,10 @@ function SessionContent() {
           toolName: data.toolName,
           toolArgs: data.toolArgs,
         };
-        setThinkingEntries((prev) => [...prev, entry]);
+        setThinkingEntries((prev) => {
+          if (prev.some((e) => e.id === entry.id)) return prev;
+          return [...prev, entry];
+        });
       });
 
       socket.on("agent:reasoning", (data: AgentReasoningEvent) => {
@@ -358,6 +369,7 @@ function SessionContent() {
       });
 
       socket.on("session:complete", () => {
+        setIsStopping(false);
         setSessionComplete(true);
       });
 
@@ -418,6 +430,16 @@ function SessionContent() {
 
   return (
     <div className="flex h-screen flex-col">
+      {/* Stopping banner */}
+      {isStopping && !sessionComplete && (
+        <div className="shrink-0 border-b border-amber-500/20 bg-amber-500/10 px-5 py-3 flex items-center gap-3">
+          <Loader2 className="size-4 animate-spin text-amber-400" />
+          <p className="text-sm text-amber-400 font-medium">
+            Stopping session — saving agent replays...
+          </p>
+        </div>
+      )}
+
       {/* Completion banner */}
       {sessionComplete && (
         <div className="shrink-0 border-b border-emerald-500/20 bg-emerald-500/10 px-5 py-3 flex items-center justify-between">
@@ -454,7 +476,7 @@ function SessionContent() {
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         onStop={handleStop}
-        tasksComplete={tasksDone || sessionComplete}
+        tasksComplete={tasksDone || sessionComplete || isStopping}
         onFollowUp={(text) => {
           if (socketRef.current) {
             socketRef.current.emit("session:followup", { sessionId, prompt: text });
@@ -484,6 +506,7 @@ function SessionContent() {
               agentActivities={MOCK_AGENT_ACTIVITIES}
               onSelectAgent={handleGridSelectAgent}
               onAgentCommand={handleAgentCommand}
+              sessionId={sessionId}
             />
           )}
         </div>
