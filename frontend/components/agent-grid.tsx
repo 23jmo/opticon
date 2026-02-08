@@ -25,9 +25,11 @@ export function AgentGrid({
   const gridCols =
     agents.length <= 1
       ? "grid-cols-1"
-      : agents.length <= 2
+      : agents.length === 2
         ? "grid-cols-2"
-        : "grid-cols-2";
+        : agents.length === 3
+          ? "grid-cols-3"
+          : "grid-cols-2";
 
   return (
     <div className={cn("grid h-full gap-2 p-2", gridCols)}>
