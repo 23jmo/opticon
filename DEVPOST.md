@@ -4,11 +4,11 @@ Stories about prompt injection attacks and security breaches in AI tools like Op
 
 The logical next step was obvious: give each agent access to its own **secure, sandboxed computing environment** via cloud VMs and run them in parallel. No access to your files. No black box. Full visibility into every click, keystroke, and reasoning step.
 
-The name Panopticon reflects this: total visibility over autonomous agents, giving users the confidence to delegate complex, multi-step tasks without sacrificing oversight or security.
+The name Opticon reflects this: total visibility over autonomous agents, giving users the confidence to delegate complex, multi-step tasks without sacrificing oversight or security.
 
 ## What it does
 
-**Panopticon** is a multi-agent orchestration platform. Users submit a natural language prompt (e.g., *"Research the top 5 AI frameworks and create a comparison spreadsheet"*), and our orchestrator automatically decomposes it into independent, parallelizable tasks.
+**Opticon** is a multi-agent orchestration platform. Users submit a natural language prompt (e.g., *"Research the top 5 AI frameworks and create a comparison spreadsheet"*), and our orchestrator automatically decomposes it into independent, parallelizable tasks.
 
 The user reviews and approves the task breakdown, then multiple AI agents each boot their own cloud Linux desktop and execute their assigned tasks simultaneously.
 
@@ -83,7 +83,7 @@ Each agent runs a vision-based **observe → think → act** loop: screenshot th
 - **Multi-runtime architectures (TypeScript + Python) add real complexity.** Every integration point — env vars, process spawning, socket communication — is a potential failure mode.
 - **E2B's cloud desktop sandboxes are a powerful primitive.** The ability to give an AI agent a full Linux desktop with internet access — while keeping it completely isolated — unlocks use cases that local execution can't safely support.
 
-## What's next for Panopticon
+## What's next for Opticon
 
 - **Agent-to-agent communication.** Beyond the shared whiteboard, agents should be able to directly hand off URLs, file paths, credentials, etc. to each other.
 - **Smarter orchestration.** Dynamic re-planning mid-session — if an agent discovers something that changes the task breakdown, the orchestrator should adapt.

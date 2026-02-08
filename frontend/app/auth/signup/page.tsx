@@ -73,7 +73,7 @@ export default function SignUpPage() {
               Create account
             </h1>
             <p className="text-sm text-zinc-400">
-              Get started with Panopticon
+              Get started with Opticon
             </p>
           </div>
 

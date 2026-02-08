@@ -2,9 +2,9 @@ import { v4 as uuidv4 } from "uuid";
 import type { Session, Todo, Agent } from "./types";
 
 const globalStore = globalThis as unknown as {
-  __panopticon_sessions?: Map<string, Session>;
+  __opticon_sessions?: Map<string, Session>;
 };
-const sessions = (globalStore.__panopticon_sessions ??= new Map<string, Session>());
+const sessions = (globalStore.__opticon_sessions ??= new Map<string, Session>());
 
 export function createSession(
   id: string,

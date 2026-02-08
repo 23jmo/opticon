@@ -146,7 +146,7 @@ export default function Home() {
           {/* Title */}
           <div className="text-center space-y-4">
             <h1 className="text-5xl sm:text-6xl font-bold tracking-tight text-gradient leading-[1.1]">
-              Panopticon
+              Opticon
             </h1>
             <p className="text-base sm:text-lg text-zinc-400 max-w-lg mx-auto leading-relaxed">
               Describe a complex task. AI agents will execute it on cloud

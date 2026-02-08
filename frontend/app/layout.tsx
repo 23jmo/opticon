@@ -15,7 +15,7 @@ const firaMono = Fira_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Panopticon",
+  title: "Opticon",
   description:
     "Submit prompts and watch multiple AI agents work on cloud desktops in parallel",
 };

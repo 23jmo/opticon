@@ -96,7 +96,7 @@ export default function PricingPage() {
                   <span className="text-sm text-zinc-500">/mo</span>
                 </div>
                 <p className="text-sm text-zinc-500">
-                  Perfect for trying out Panopticon.
+                  Perfect for trying out Opticon.
                 </p>
               </div>
 

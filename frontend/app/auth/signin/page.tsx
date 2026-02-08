@@ -49,7 +49,7 @@ function SignInForm() {
           Welcome back
         </h1>
         <p className="text-sm text-zinc-400">
-          Sign in to your Panopticon account
+          Sign in to your Opticon account
         </p>
       </div>
 

@@ -83,9 +83,9 @@ export async function POST(request: Request) {
   persistTodos(sessionId, todos).catch(console.error);
 
   // Set session to pending_approval so the user can review tasks
-  const panopticonSession = getSession(sessionId);
-  if (panopticonSession) {
-    panopticonSession.status = "pending_approval";
+  const opticonSession = getSession(sessionId);
+  if (opticonSession) {
+    opticonSession.status = "pending_approval";
     // Persist status update
     persistSessionStatus(sessionId, "pending_approval").catch(console.error);
   }

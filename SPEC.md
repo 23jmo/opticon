@@ -1,8 +1,8 @@
-# Panopticon — Technical Specification
+# Opticon — Technical Specification
 
 ## Overview
 
-Panopticon is a web platform where users submit natural language prompts (e.g., "Research AI agents and create a Google Doc summarizing your findings"). An orchestrator decomposes the prompt into independent tasks, the user reviews and approves the task breakdown, then multiple AI agents each boot their own cloud Linux desktop and execute tasks in parallel. Live desktop streams, agent reasoning, and a read-only shared whiteboard are all visible in the browser.
+Opticon is a web platform where users submit natural language prompts (e.g., "Research AI agents and create a Google Doc summarizing your findings"). An orchestrator decomposes the prompt into independent tasks, the user reviews and approves the task breakdown, then multiple AI agents each boot their own cloud Linux desktop and execute tasks in parallel. Live desktop streams, agent reasoning, and a read-only shared whiteboard are all visible in the browser.
 
 Built as a polished demo. Reliability and visual quality over feature breadth.
 
@@ -59,7 +59,7 @@ Built as a polished demo. Reliability and visual quality over feature breadth.
 
 ### 1. Frontend (Next.js App Router + Tailwind + shadcn/ui)
 
-**Design direction:** Dark theme, cyan/teal accent, polished with subtle motion (fade-ins, slide transitions, loading skeletons). Professional but premium feel. Panopticon branding (name + logo) but standard technical terminology (agents, tasks, sessions).
+**Design direction:** Dark theme, cyan/teal accent, polished with subtle motion (fade-ins, slide transitions, loading skeletons). Professional but premium feel. Opticon branding (name + logo) but standard technical terminology (agents, tasks, sessions).
 
 #### Home Screen
 
