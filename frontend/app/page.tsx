@@ -12,6 +12,34 @@ import { PlanBadge } from "@/components/plan-badge";
 import { PLAN_LIMITS, PRO_FEATURE_SLUG } from "@/lib/billing-constants";
 import Link from "next/link";
 
+const EXAMPLE_PROMPTS = [
+  {
+    label: "Open Google.com",
+    prompt:
+      "Open Google.com in the browser, search for 'latest AI research papers 2026', and compile a summary of the top 5 results with titles, authors, and key findings into a text document on the desktop.",
+  },
+  {
+    label: "Deep research",
+    prompt:
+      "Conduct deep research on the current state of quantum computing in 2026. Search multiple sources including academic papers, tech news sites, and company announcements. Create a comprehensive Google Doc that covers recent breakthroughs, major players, commercial applications, and future outlook with citations.",
+  },
+  {
+    label: "Coordinated research paper",
+    prompt:
+      "Write a coordinated research paper on the environmental and economic impact of large language models. Agent 1 should research energy consumption and carbon footprint data. Agent 2 should research economic benefits and productivity gains. Then combine findings into a well-structured paper with an abstract, introduction, methodology, findings, and conclusion in Google Docs.",
+  },
+  {
+    label: "Competitive analysis",
+    prompt:
+      "Perform a competitive analysis of the top 4 AI coding assistants (GitHub Copilot, Cursor, Claude Code, Windsurf). Each agent should research one tool — gathering pricing, features, user reviews, and limitations. Compile everything into a comparison spreadsheet and a summary document with recommendations.",
+  },
+  {
+    label: "Build a website",
+    prompt:
+      "Build a personal portfolio website using HTML, CSS, and JavaScript. It should have a hero section with a name and tagline, an about section, a projects grid with placeholder cards, and a contact form. Use a modern dark theme with smooth scroll animations. Save all files to the desktop.",
+  },
+];
+
 export default function Home() {
   const { data: authSession } = useSession();
   const { checkFeatureAccess } = useBilling();
@@ -211,6 +239,19 @@ export default function Home() {
             </div>
           </div>
 
+          {/* Example prompts */}
+          <div className="flex flex-wrap justify-center gap-2">
+            {EXAMPLE_PROMPTS.map((example) => (
+              <button
+                key={example.label}
+                onClick={() => setPrompt(example.prompt)}
+                className="rounded-full border border-zinc-800 bg-zinc-900/60 px-3.5 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800/60 transition-all"
+              >
+                {example.label}
+              </button>
+            ))}
+          </div>
+
           {/* Keyboard hint */}
           <p className="text-center text-xs text-zinc-600">
             <kbd className="rounded border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 font-mono text-[10px] text-zinc-500">
@@ -222,20 +263,6 @@ export default function Home() {
             </kbd>
             <span className="ml-1.5">to launch</span>
           </p>
-
-          {/* Demo shortcut */}
-          <div className="flex justify-center">
-            <button
-              onClick={() =>
-                router.push(
-                  "/session/demo?prompt=Write+a+comprehensive+research+paper+on+Google+Docs+about+the+rise+of+Daedalus+Labs&agents=4"
-                )
-              }
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4 decoration-border"
-            >
-              or try the demo
-            </button>
-          </div>
 
           {/* Error */}
           {error && (
