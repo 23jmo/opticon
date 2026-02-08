@@ -62,7 +62,9 @@ export async function callK2Think(
     }
 
     const data = (await response.json()) as K2Response;
-    return data.choices[0].message.content;
+    const content = data.choices[0].message.content;
+    console.log("[K2 Think] Raw response:", content.substring(0, 200));
+    return content;
   } catch (error) {
     console.error("[K2 Think] Fetch failed:", error);
     throw new Error(
@@ -93,13 +95,35 @@ Rules:
 
   const response = await callK2Think(systemPrompt, userPrompt, 2048);
 
-  // Parse JSON response
-  const raw = response
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/```\s*$/, "")
-    .trim();
-  const parsed = JSON.parse(raw);
-  return parsed.todos.map((t: { description: string }) => t.description);
+  // Parse JSON response - K2 Think may include reasoning before the JSON
+  let raw = response.trim();
+
+  // Try to extract JSON from markdown code blocks
+  const codeBlockMatch = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (codeBlockMatch) {
+    raw = codeBlockMatch[1].trim();
+  }
+
+  // Try to find JSON object in the text
+  const jsonMatch = raw.match(/\{[\s\S]*"todos"[\s\S]*\}/);
+  if (jsonMatch) {
+    raw = jsonMatch[0];
+  }
+
+  console.log("[K2 Think] Attempting to parse:", raw.substring(0, 200));
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed.todos || !Array.isArray(parsed.todos)) {
+      throw new Error("Response missing 'todos' array");
+    }
+    return parsed.todos.map((t: { description: string }) => t.description);
+  } catch (parseError) {
+    console.error("[K2 Think] JSON parse failed. Full response:", response);
+    throw new Error(
+      `Failed to parse K2 Think response as JSON: ${parseError instanceof Error ? parseError.message : String(parseError)}`
+    );
+  }
 }
 
 /**
@@ -129,11 +153,33 @@ User refinement: ${refinement.trim()}`;
 
   const response = await callK2Think(systemPrompt, userPrompt, 2048);
 
-  // Parse JSON response
-  const raw = response
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/```\s*$/, "")
-    .trim();
-  const parsed = JSON.parse(raw);
-  return parsed.todos.map((t: { description: string }) => t.description);
+  // Parse JSON response - K2 Think may include reasoning before the JSON
+  let raw = response.trim();
+
+  // Try to extract JSON from markdown code blocks
+  const codeBlockMatch = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (codeBlockMatch) {
+    raw = codeBlockMatch[1].trim();
+  }
+
+  // Try to find JSON object in the text
+  const jsonMatch = raw.match(/\{[\s\S]*"todos"[\s\S]*\}/);
+  if (jsonMatch) {
+    raw = jsonMatch[0];
+  }
+
+  console.log("[K2 Think] Attempting to parse (refine):", raw.substring(0, 200));
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed.todos || !Array.isArray(parsed.todos)) {
+      throw new Error("Response missing 'todos' array");
+    }
+    return parsed.todos.map((t: { description: string }) => t.description);
+  } catch (parseError) {
+    console.error("[K2 Think] JSON parse failed (refine). Full response:", response);
+    throw new Error(
+      `Failed to parse K2 Think response as JSON: ${parseError instanceof Error ? parseError.message : String(parseError)}`
+    );
+  }
 }
