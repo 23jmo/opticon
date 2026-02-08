@@ -68,6 +68,9 @@ export interface AgentThinkingEvent {
   action: string;
   timestamp: string;
   isError?: boolean;
+  actionId?: string;
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
 }
 
 export interface AgentReasoningEvent {
@@ -127,6 +130,7 @@ export interface ServerToClientEvents {
   "session:complete": (payload: SessionCompleteEvent) => void;
   "session:tasks_done": (payload: SessionTasksDoneEvent) => void;
   "whiteboard:updated": (payload: WhiteboardUpdatedEvent) => void;
+  "replay:ready": (payload: ReplayReadyEvent) => void;
   "task:assign": (payload: {
     taskId: string;
     description: string;
@@ -148,6 +152,7 @@ export interface ClientToServerEvents {
   "task:completed": (payload: TaskCompletedEvent) => void;
   "agent:terminated": (payload: AgentTerminatedEvent) => void;
   "whiteboard:updated": (payload: WhiteboardUpdatedEvent) => void;
+  "replay:complete": (payload: ReplayCompleteEvent) => void;
 }
 
 // Alias for frontend components that use "Task" instead of "Todo"
@@ -169,4 +174,32 @@ export interface ThinkingEntry {
 export interface AgentCommandEvent {
   agentId: string;
   message: string;
+}
+
+// --- Replay types ---
+
+export interface ReplayFrame {
+  index: number;
+  timestamp: string;
+  url: string;
+  action: string;
+}
+
+export interface ReplayManifest {
+  sessionId: string;
+  agentId: string;
+  frameCount: number;
+  frames: ReplayFrame[];
+}
+
+export interface ReplayCompleteEvent {
+  agentId: string;
+  manifestUrl: string;
+  frameCount: number;
+}
+
+export interface ReplayReadyEvent {
+  agentId: string;
+  manifestUrl: string;
+  frameCount: number;
 }

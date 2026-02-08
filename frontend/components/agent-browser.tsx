@@ -5,6 +5,7 @@ import { Agent } from "@/lib/types";
 import { AgentActivity } from "@/lib/mock-data";
 import { AgentScreen } from "./agent-screen";
 import { VMTab } from "./vm-tab";
+import { ReplayScrubber } from "./replay-scrubber";
 import { Send, Ellipsis, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,7 @@ interface AgentBrowserProps {
   sessionId?: string;
   whiteboard?: string;
   onAgentCommand?: (agentId: string, message: string) => void;
+  replays?: Record<string, { manifestUrl: string; frameCount: number }>;
 }
 
 export function AgentBrowser({
@@ -28,6 +30,7 @@ export function AgentBrowser({
   sessionId,
   whiteboard,
   onAgentCommand,
+  replays,
 }: AgentBrowserProps) {
   const isMock = sessionId === "demo";
   const isWhiteboardTab = activeAgentId === "__whiteboard__";
@@ -117,6 +120,22 @@ export function AgentBrowser({
         {agents.map((agent) => {
           const isActive = agent.id === activeAgentId && !isWhiteboardTab;
           const agentActivity = agentActivities[agent.id];
+          const agentReplay = replays?.[agent.id];
+
+          // Show replay scrubber for terminated agents that have a replay
+          if (agentReplay && agent.status === "terminated") {
+            return (
+              <div
+                key={agent.id}
+                className={`absolute inset-0 ${isActive ? "visible z-10" : "invisible z-0"}`}
+              >
+                <ReplayScrubber
+                  manifestUrl={agentReplay.manifestUrl}
+                  agentLabel={`Agent ${agent.id.slice(0, 6)}`}
+                />
+              </div>
+            );
+          }
 
           if (isMock || !agent.streamUrl) {
             return isActive ? (

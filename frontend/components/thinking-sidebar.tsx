@@ -1,41 +1,45 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { ThinkingEntry } from "@/lib/types";
-import { Agent } from "@/lib/types";
-import { AgentActivity } from "@/lib/mock-data";
-import { ChevronRight } from "lucide-react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useMemo,
+  useCallback,
+  memo,
+} from "react";
+import { ThinkingEntry, Agent } from "@/lib/types";
+import { ChevronRight, ArrowDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+const MAX_ENTRIES = 200;
+const TYPEWRITER_SPEED = 60;
+const SCROLL_THRESHOLD = 100;
 
 interface ThinkingSidebarProps {
   entries: ThinkingEntry[];
   agents: Agent[];
-  agentActivities: Record<string, AgentActivity>;
   activeAgentId?: string;
 }
 
-function formatToolDetails(
-  toolName: string,
-  toolArgs: Record<string, unknown>
-): string {
-  switch (toolName) {
-    case "click": {
-      const label = toolArgs.element
-        ? `on "${toolArgs.element}"`
-        : `at (${toolArgs.x}, ${toolArgs.y})`;
-      return `click ${label}`;
-    }
-    case "type_text":
-      return `type "${toolArgs.text}"`;
-    case "press_key":
-      return `press ${toolArgs.key}`;
-    case "scroll":
-      return `scroll ${toolArgs.direction} ${toolArgs.amount}`;
-    case "move_mouse":
-      return `move to (${toolArgs.x}, ${toolArgs.y})`;
-    default:
-      return `${toolName}(${JSON.stringify(toolArgs)})`;
-  }
+// --- Helpers ---
+
+function getAgentNumber(agentId: string): string {
+  const match = agentId.match(/(\d+)$/);
+  return match ? String(parseInt(match[1], 10)) : agentId.slice(0, 4);
+}
+
+function getAgentIndex(agentId: string, agents: Agent[]): number {
+  const idx = agents.findIndex((a) => a.id === agentId);
+  return idx >= 0 ? idx : 0;
+}
+
+function getAgentColor(index: number) {
+  const hue = (index * 90) % 360;
+  return {
+    bg: `hsl(${hue} 70% 60% / 0.15)`,
+    text: `hsl(${hue} 70% 60%)`,
+  };
 }
 
 function formatRelativeTime(timestamp: string): string {
@@ -52,61 +56,259 @@ function formatRelativeTime(timestamp: string): string {
   });
 }
 
-function getAgentNumber(agentId: string): string {
-  const match = agentId.match(/(\d+)$/);
-  return match ? String(parseInt(match[1], 10)) : agentId.slice(0, 4);
+function smartTruncate(text: string, startLen = 20, endLen = 10): string {
+  if (text.length <= startLen + endLen + 3) return text;
+  return text.slice(0, startLen) + "\u2026" + text.slice(-endLen);
 }
+
+function formatToolChip(
+  toolName: string,
+  toolArgs: Record<string, unknown>
+): string {
+  switch (toolName) {
+    case "click": {
+      if (toolArgs.element)
+        return `click("${smartTruncate(String(toolArgs.element))}")`;
+      return `click(${toolArgs.x}, ${toolArgs.y})`;
+    }
+    case "type_text":
+      return `type_text("${smartTruncate(String(toolArgs.text))}")`;
+    case "press_key":
+      return `press_key(${toolArgs.key})`;
+    case "scroll":
+      return `scroll(${toolArgs.direction}, ${toolArgs.amount})`;
+    case "move_mouse":
+      return `move_mouse(${toolArgs.x}, ${toolArgs.y})`;
+    default:
+      return `${toolName}({…})`;
+  }
+}
+
+// --- TypewriterText ---
+
+function TypewriterText({
+  text,
+  animate,
+  speed = TYPEWRITER_SPEED,
+  onComplete,
+}: {
+  text: string;
+  animate: boolean;
+  speed?: number;
+  onComplete?: () => void;
+}) {
+  const [wordCount, setWordCount] = useState(0);
+  const words = useMemo(() => text.split(/\s+/).filter(Boolean), [text]);
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+  const hasAnimated = useRef(false);
+
+  useEffect(() => {
+    if (!animate || hasAnimated.current) {
+      setWordCount(words.length);
+      return;
+    }
+
+    setWordCount(0);
+    let current = 0;
+    const interval = setInterval(() => {
+      current++;
+      setWordCount(current);
+      if (current >= words.length) {
+        clearInterval(interval);
+        hasAnimated.current = true;
+        onCompleteRef.current?.();
+      }
+    }, speed);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [animate, text, words.length, speed]);
+
+  if (!animate || hasAnimated.current || wordCount >= words.length)
+    return <>{text}</>;
+
+  return (
+    <>
+      {words.slice(0, wordCount).join(" ")}
+      <span className="inline-block w-[2px] h-[0.85em] bg-foreground/40 ml-0.5 animate-pulse align-text-bottom" />
+    </>
+  );
+}
+
+// --- ToolChip ---
+
+const ToolChip = memo(function ToolChip({
+  entry,
+  isExpanded,
+  onToggle,
+}: {
+  entry: ThinkingEntry;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  if (!entry.toolName || !entry.toolArgs) return null;
+
+  const chipText = formatToolChip(entry.toolName, entry.toolArgs);
+
+  return (
+    <div className="mt-1.5" style={{ animation: "chipEnter 0.3s ease-out" }}>
+      <button
+        onClick={onToggle}
+        className={cn(
+          "flex items-center gap-1 max-w-full rounded px-2 py-1 text-[11px] font-mono transition-colors",
+          "text-muted-foreground/70 bg-muted/40 hover:bg-muted/60 hover:text-muted-foreground"
+        )}
+      >
+        <ChevronRight
+          className={cn(
+            "size-3 shrink-0 transition-transform duration-150",
+            isExpanded && "rotate-90"
+          )}
+        />
+        <span className="truncate">{chipText}</span>
+      </button>
+
+      {isExpanded && (
+        <div className="mt-1 ml-1 rounded border border-border bg-muted/40 px-3 py-2">
+          <div className="flex flex-wrap gap-x-3 gap-y-1">
+            {Object.entries(entry.toolArgs).map(([key, value]) => (
+              <span key={key} className="text-[11px] font-mono">
+                <span className="text-muted-foreground">{key}</span>
+                <span className="text-muted-foreground/60">{" = "}</span>
+                <span className="text-foreground/80">
+                  {typeof value === "string"
+                    ? value.length > 40
+                      ? `"${value.slice(0, 40)}…"`
+                      : `"${value}"`
+                    : String(value)}
+                </span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+// --- Main Component ---
 
 export function ThinkingSidebar({
   entries,
   agents,
-  agentActivities,
   activeAgentId,
 }: ThinkingSidebarProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [expandedEntries, setExpandedEntries] = useState<Set<string>>(
+  const [expandedThreads, setExpandedThreads] = useState<Set<string>>(
     new Set()
   );
   const [filterAgent, setFilterAgent] = useState<string | null>(null);
+  const [isNearBottom, setIsNearBottom] = useState(true);
+  const [unseenCount, setUnseenCount] = useState(0);
+  const animatedEntries = useRef(new Set<string>());
+  const lastSeenCount = useRef(0);
+  const prevEntryCount = useRef(0);
 
-  const filteredEntries = filterAgent
-    ? entries.filter((e) => e.agentId === filterAgent)
-    : entries;
+  // Rolling window + filtering
+  const { displayEntries, trimmed } = useMemo(() => {
+    const filtered = filterAgent
+      ? entries.filter((e) => e.agentId === filterAgent)
+      : entries;
+    if (filtered.length <= MAX_ENTRIES)
+      return { displayEntries: filtered, trimmed: false };
+    return {
+      displayEntries: filtered.slice(-MAX_ENTRIES),
+      trimmed: true,
+    };
+  }, [entries, filterAgent]);
 
+  // Compute thread map: entry.id -> threadId (first entry's id in the consecutive run)
+  const threadMap = useMemo(() => {
+    const map = new Map<string, string>();
+    let currentThreadId = "";
+    let currentAgentId = "";
+    for (const entry of displayEntries) {
+      if (entry.agentId !== currentAgentId) {
+        currentAgentId = entry.agentId;
+        currentThreadId = entry.id;
+      }
+      map.set(entry.id, currentThreadId);
+    }
+    return map;
+  }, [displayEntries]);
+
+  // Scroll tracking
+  const handleScroll = useCallback(() => {
+    if (!scrollRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+    const nearBottom =
+      scrollHeight - scrollTop - clientHeight < SCROLL_THRESHOLD;
+    setIsNearBottom(nearBottom);
+    if (nearBottom) {
+      setUnseenCount(0);
+      lastSeenCount.current = displayEntries.length;
+    }
+  }, [displayEntries.length]);
+
+  // Auto-scroll + unseen count tracking
   useEffect(() => {
+    if (isNearBottom && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      lastSeenCount.current = displayEntries.length;
+      setUnseenCount(0);
+    } else if (displayEntries.length > prevEntryCount.current) {
+      const newUnseen = displayEntries.length - lastSeenCount.current;
+      if (newUnseen > 0) setUnseenCount(newUnseen);
+    }
+    prevEntryCount.current = displayEntries.length;
+  }, [displayEntries.length, isNearBottom]);
+
+  const jumpToBottom = useCallback(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [filteredEntries]);
+    setIsNearBottom(true);
+    setUnseenCount(0);
+    lastSeenCount.current = displayEntries.length;
+  }, [displayEntries.length]);
 
-  const toggleExpand = (entryId: string) => {
-    setExpandedEntries((prev) => {
+  const toggleThread = useCallback((threadId: string) => {
+    setExpandedThreads((prev) => {
       const next = new Set(prev);
-      if (next.has(entryId)) {
-        next.delete(entryId);
+      if (next.has(threadId)) {
+        next.delete(threadId);
       } else {
-        next.add(entryId);
+        next.add(threadId);
       }
       return next;
     });
-  };
+  }, []);
+
+  const markAnimated = useCallback((entryId: string) => {
+    animatedEntries.current.add(entryId);
+  }, []);
+
+  const isFiltered = filterAgent !== null;
 
   return (
-    <div className="flex h-full flex-col border-l border-border bg-card/30">
+    <div className="relative flex h-full flex-col border-l border-border bg-card/30">
+      {/* Inline keyframes for chip enter animation */}
+      <style>{`
+        @keyframes chipEnter {
+          from { opacity: 0; transform: translateY(2px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+
       {/* Header */}
       <div className="shrink-0 border-b border-border px-4 py-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Activity
-          </h3>
-          <span className="text-[11px] tabular-nums text-muted-foreground">
-            {filteredEntries.length}
-          </span>
-        </div>
+        <h3 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+          Thinking
+        </h3>
 
         {/* Agent filter */}
         {agents.length > 1 && (
-          <div className="flex gap-1 mt-2 flex-wrap">
+          <div className="mt-2 flex flex-wrap gap-1">
             <button
               onClick={() => setFilterAgent(null)}
               className={cn(
@@ -118,8 +320,9 @@ export function ThinkingSidebar({
             >
               All
             </button>
-            {agents.map((agent) => {
-              const activity = agentActivities[agent.id];
+            {agents.map((agent, idx) => {
+              const isActive = filterAgent === agent.id;
+              const color = getAgentColor(idx);
               return (
                 <button
                   key={agent.id}
@@ -128,12 +331,15 @@ export function ThinkingSidebar({
                   }
                   className={cn(
                     "rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors",
-                    filterAgent === agent.id
-                      ? "bg-primary/15 text-primary"
-                      : "text-muted-foreground hover:text-foreground"
+                    !isActive && "text-muted-foreground hover:text-foreground"
                   )}
+                  style={
+                    isActive
+                      ? { backgroundColor: color.bg, color: color.text }
+                      : undefined
+                  }
                 >
-                  {activity?.label || agent.name}
+                  {getAgentNumber(agent.id)}
                 </button>
               );
             })}
@@ -142,129 +348,155 @@ export function ThinkingSidebar({
       </div>
 
       {/* Feed */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        {filteredEntries.length === 0 ? (
-          <div className="flex items-center justify-center h-32">
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto"
+      >
+        {/* Trimmed indicator */}
+        {trimmed && (
+          <div className="px-4 py-2 text-center">
+            <span className="text-[10px] text-muted-foreground/60">
+              Showing last {MAX_ENTRIES} entries
+            </span>
+          </div>
+        )}
+
+        {displayEntries.length === 0 ? (
+          <div className="flex h-32 items-center justify-center">
             <p className="text-[13px] text-muted-foreground">
-              Waiting for activity...
+              Waiting for agent thoughts…
             </p>
           </div>
         ) : (
           <div className="py-1">
-            {filteredEntries.map((entry, index) => {
-              const isExpanded = expandedEntries.has(entry.id);
-              const isLatest = index === filteredEntries.length - 1;
-              const hasDetails =
-                entry.reasoning || (entry.toolName && entry.toolArgs);
+            {displayEntries.map((entry, index) => {
+              const prevEntry =
+                index > 0 ? displayEntries[index - 1] : null;
+              const isSameAgent = prevEntry?.agentId === entry.agentId;
+              const showHeader = !isSameAgent;
+              const threadId = threadMap.get(entry.id) || entry.id;
+              const isThreadExpanded = expandedThreads.has(threadId);
+              const shouldAnimate =
+                !!entry.reasoning &&
+                !animatedEntries.current.has(entry.id);
+              const bodyText = entry.reasoning || entry.action;
+              const agentIdx = getAgentIndex(entry.agentId, agents);
+              const agentColor = getAgentColor(agentIdx);
 
+              // --- Filtered mode: minimal headers, hover timestamps ---
+              if (isFiltered) {
+                return (
+                  <div
+                    key={entry.id}
+                    className={cn(
+                      "group px-4 py-1.5",
+                      entry.isError && "bg-destructive/10"
+                    )}
+                  >
+                    {/* Hover timestamp */}
+                    <div className="relative">
+                      <span className="absolute right-0 top-0 text-[10px] tabular-nums text-muted-foreground/50 opacity-0 transition-opacity group-hover:opacity-100">
+                        {formatRelativeTime(entry.timestamp)}
+                      </span>
+
+                      <p
+                        className={cn(
+                          "pr-14 text-sm leading-relaxed",
+                          entry.isError
+                            ? "font-medium text-destructive"
+                            : "text-foreground/90"
+                        )}
+                      >
+                        <TypewriterText
+                          text={bodyText}
+                          animate={shouldAnimate}
+                          onComplete={() => markAnimated(entry.id)}
+                        />
+                      </p>
+
+                      {entry.toolName && entry.toolArgs && (
+                        <ToolChip
+                          entry={entry}
+                          isExpanded={isThreadExpanded}
+                          onToggle={() => toggleThread(threadId)}
+                        />
+                      )}
+                    </div>
+                  </div>
+                );
+              }
+
+              // --- Unfiltered mode: full threading ---
               return (
                 <div
                   key={entry.id}
-                  className={cn(
-                    "px-4 py-2.5 border-b border-border/50 transition-colors",
-                    entry.isError
-                      ? "bg-destructive/10"
-                      : isLatest
-                        ? "bg-muted/50"
-                        : "hover:bg-muted/30"
-                  )}
+                  className={cn(showHeader && index > 0 && "pt-3")}
                 >
-                  {/* Main row */}
-                  <div className="flex items-start gap-2.5">
-                    {/* Agent indicator */}
-                    <span className="mt-[3px] shrink-0 flex items-center justify-center size-5 rounded bg-muted text-[10px] font-medium text-muted-foreground tabular-nums">
-                      {getAgentNumber(entry.agentId)}
-                    </span>
-
-                    {/* Content */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-3">
-                        <p
-                          className={cn(
-                            "text-[13px] leading-snug",
-                            entry.isError
-                              ? "text-destructive font-medium"
-                              : isLatest
-                                ? "text-foreground font-medium"
-                                : "text-foreground/80"
-                          )}
-                        >
-                          {entry.action}
-                        </p>
-                        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground mt-px">
-                          {formatRelativeTime(entry.timestamp)}
-                        </span>
-                      </div>
-
-                      {/* Tool call inline */}
-                      {entry.toolName && entry.toolArgs && (
-                        <p className="mt-1 text-[11px] font-mono text-muted-foreground truncate">
-                          {formatToolDetails(entry.toolName, entry.toolArgs)}
-                        </p>
-                      )}
-
-                      {/* Expand toggle */}
-                      {hasDetails && (
-                        <button
-                          onClick={() => toggleExpand(entry.id)}
-                          className="mt-1.5 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          <ChevronRight
-                            className={cn(
-                              "size-3 transition-transform",
-                              isExpanded && "rotate-90"
-                            )}
-                          />
-                          {entry.reasoning && entry.toolName
-                            ? "reasoning & details"
-                            : entry.reasoning
-                              ? "reasoning"
-                              : "details"}
-                        </button>
-                      )}
-
-                      {/* Expanded content */}
-                      {isExpanded && hasDetails && (
-                        <div className="mt-2 space-y-2">
-                          {/* Tool args */}
-                          {entry.toolName && entry.toolArgs && (
-                            <div className="rounded border border-border bg-muted/40 px-3 py-2">
-                              <div className="flex flex-wrap gap-x-3 gap-y-1">
-                                {Object.entries(entry.toolArgs).map(
-                                  ([key, value]) => (
-                                    <span
-                                      key={key}
-                                      className="text-[11px] font-mono"
-                                    >
-                                      <span className="text-muted-foreground">
-                                        {key}
-                                      </span>
-                                      <span className="text-muted-foreground/60">
-                                        {" = "}
-                                      </span>
-                                      <span className="text-foreground/80">
-                                        {typeof value === "string"
-                                          ? value.length > 40
-                                            ? `"${value.slice(0, 40)}..."`
-                                            : `"${value}"`
-                                          : String(value)}
-                                      </span>
-                                    </span>
-                                  )
-                                )}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Reasoning */}
-                          {entry.reasoning && (
-                            <p className="text-[12px] leading-relaxed text-muted-foreground pl-0.5">
-                              {entry.reasoning}
-                            </p>
-                          )}
-                        </div>
-                      )}
+                  {/* Agent header (only on thread start) */}
+                  {showHeader && (
+                    <div className="mb-0.5 flex items-center gap-2 px-4 pt-1">
+                      <span
+                        className="flex size-5 shrink-0 items-center justify-center rounded text-[10px] font-bold tabular-nums"
+                        style={{
+                          backgroundColor: agentColor.bg,
+                          color: agentColor.text,
+                        }}
+                      >
+                        {getAgentNumber(entry.agentId)}
+                      </span>
+                      <span className="text-xs font-medium text-muted-foreground">
+                        Agent {getAgentNumber(entry.agentId)}
+                      </span>
+                      <span className="ml-auto text-[10px] tabular-nums text-muted-foreground/60">
+                        {formatRelativeTime(entry.timestamp)}
+                      </span>
                     </div>
+                  )}
+
+                  {/* Entry content */}
+                  <div
+                    className={cn(
+                      "px-4 py-1",
+                      isSameAgent && "ml-3 border-l-2 pl-3",
+                      isSameAgent &&
+                        (entry.isError
+                          ? "border-destructive"
+                          : "border-muted"),
+                      !isSameAgent && entry.isError && "bg-destructive/10"
+                    )}
+                  >
+                    {/* Inline timestamp for continuation entries */}
+                    {isSameAgent && (
+                      <span className="float-right ml-2 text-[10px] tabular-nums text-muted-foreground/50">
+                        {formatRelativeTime(entry.timestamp)}
+                      </span>
+                    )}
+
+                    {/* Body text */}
+                    <p
+                      className={cn(
+                        "text-sm leading-relaxed",
+                        entry.isError
+                          ? "font-medium text-destructive"
+                          : "text-foreground/90"
+                      )}
+                    >
+                      <TypewriterText
+                        text={bodyText}
+                        animate={shouldAnimate}
+                        onComplete={() => markAnimated(entry.id)}
+                      />
+                    </p>
+
+                    {/* Tool chip */}
+                    {entry.toolName && entry.toolArgs && (
+                      <ToolChip
+                        entry={entry}
+                        isExpanded={isThreadExpanded}
+                        onToggle={() => toggleThread(threadId)}
+                      />
+                    )}
                   </div>
                 </div>
               );
@@ -272,6 +504,17 @@ export function ThinkingSidebar({
           </div>
         )}
       </div>
+
+      {/* Jump to bottom button */}
+      {!isNearBottom && unseenCount > 0 && (
+        <button
+          onClick={jumpToBottom}
+          className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground shadow-lg transition-all hover:bg-primary/90"
+        >
+          <ArrowDown className="size-3" />
+          {unseenCount} new
+        </button>
+      )}
     </div>
   );
 }

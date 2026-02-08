@@ -25,12 +25,14 @@ import type {
   AgentTerminatedEvent,
   WhiteboardUpdatedEvent,
   SessionFollowUpEvent,
+  ReplayCompleteEvent,
 } from "./lib/types";
 import {
   persistTodoStatus,
   persistTodos,
   persistSessionStatus,
 } from "./lib/db/session-persist";
+import { persistReplay } from "./lib/db/replay-persist";
 import { decomposeTasks } from "./lib/orchestrator";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -294,6 +296,9 @@ app.prepare().then(() => {
         action: data.action,
         timestamp: data.timestamp || new Date().toISOString(),
         isError: data.isError,
+        actionId: data.actionId,
+        toolName: data.toolName,
+        toolArgs: data.toolArgs,
       });
     });
 
@@ -377,6 +382,28 @@ app.prepare().then(() => {
       io.to(`session:${sessionId}`).emit("whiteboard:updated", {
         sessionId,
         content: updated,
+      });
+    });
+
+    socket.on("replay:complete", async (data: ReplayCompleteEvent) => {
+      const sessionId = findSessionId(socket);
+      if (!sessionId) return;
+
+      const { agentId, manifestUrl, frameCount } = data;
+      console.log(
+        `[server] Session ${sessionId} — replay uploaded for agent ${agentId} (${frameCount} frames)`
+      );
+
+      // Persist to database
+      persistReplay(sessionId, agentId, manifestUrl, frameCount).catch(
+        console.error
+      );
+
+      // Broadcast to browser clients
+      io.to(`session:${sessionId}`).emit("replay:ready", {
+        agentId,
+        manifestUrl,
+        frameCount,
       });
     });
 
