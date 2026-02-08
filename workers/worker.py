@@ -75,7 +75,7 @@ async def call_with_retry(client, **kwargs):
             await asyncio.sleep(delay)
 
 
-async def run_agent_loop(client, task_description, whiteboard_content="", on_step=None, replay_buffer=None):
+async def run_agent_loop(client, task_description, whiteboard_content="", on_step=None, replay_buffer=None, terminated=None):
     """
     Observe-think-act loop using Dedalus chat.completions.create().
 
@@ -85,6 +85,7 @@ async def run_agent_loop(client, task_description, whiteboard_content="", on_ste
       3. Execute the tool, loop back to 1
 
     Returns the final summary when the model calls 'done'.
+    If `terminated` (asyncio.Event) is set, exits early.
     """
     system_content = SYSTEM_PROMPT
     if whiteboard_content:
@@ -100,6 +101,11 @@ async def run_agent_loop(client, task_description, whiteboard_content="", on_ste
     last_action_label = "Starting task"
 
     for step in range(MAX_STEPS):
+        # Check for termination between steps
+        if terminated is not None and terminated.is_set():
+            logger.info("Terminated during task at step %d", step)
+            return "(terminated by user)"
+
         # Observe: take screenshot and show it to the model
         screenshot_msg, raw_png = make_screenshot_message()
         messages.append(screenshot_msg)
@@ -277,6 +283,7 @@ async def main():
                     whiteboard_content=whiteboard_content,
                     on_step=on_step,
                     replay_buffer=replay_buffer,
+                    terminated=terminated,
                 )
             except Exception as e:
                 result = f"Error: {e}"

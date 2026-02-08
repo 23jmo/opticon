@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Task, Agent } from "@/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { CheckCircle2, ArrowLeft } from "lucide-react";
+import { CheckCircle2, ArrowLeft, ChevronLeft, ChevronRight, MonitorPlay } from "lucide-react";
 import { ReplayScrubber } from "./replay-scrubber";
 
 interface SessionSummaryProps {
@@ -138,19 +138,16 @@ export function SessionSummary({
                       No tasks completed
                     </p>
                   )}
-                  {replays[agent.id] && (
-                    <div className="h-48 rounded-lg overflow-hidden border border-border">
-                      <ReplayScrubber
-                        manifestUrl={replays[agent.id].manifestUrl}
-                        agentLabel={`Agent ${agent.id.slice(0, 6)}`}
-                      />
-                    </div>
-                  )}
                 </CardContent>
               </Card>
             );
           })}
         </div>
+
+        {/* Agent Replays */}
+        {Object.keys(replays).length > 0 && (
+          <ReplayCarousel replays={replays} agents={agents} />
+        )}
 
         {/* Whiteboard */}
         {whiteboard && typeof whiteboard === "string" && (
@@ -178,6 +175,143 @@ export function SessionSummary({
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Replay Carousel ──────────────────────────────────────────────────────────
+
+interface ReplayCarouselProps {
+  replays: Record<string, { manifestUrl: string; frameCount: number }>;
+  agents: Agent[];
+}
+
+function ReplayCarousel({ replays, agents }: ReplayCarouselProps) {
+  const agentIds = agents
+    .map((a) => a.id)
+    .filter((id) => replays[id] && replays[id].frameCount > 0);
+
+  const [activeIdx, setActiveIdx] = useState(0);
+  const touchStartX = useRef<number | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const SWIPE_THRESHOLD = 50;
+
+  const goNext = useCallback(() => {
+    setActiveIdx((prev) => Math.min(prev + 1, agentIds.length - 1));
+  }, [agentIds.length]);
+
+  const goPrev = useCallback(() => {
+    setActiveIdx((prev) => Math.max(prev - 1, 0));
+  }, []);
+
+  // Keyboard left/right to switch agents
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft" && e.shiftKey) { e.preventDefault(); goPrev(); }
+      else if (e.key === "ArrowRight" && e.shiftKey) { e.preventDefault(); goNext(); }
+    };
+    el.addEventListener("keydown", handleKey);
+    return () => el.removeEventListener("keydown", handleKey);
+  }, [goNext, goPrev]);
+
+  if (agentIds.length === 0) return null;
+
+  const currentAgentId = agentIds[activeIdx];
+  const currentReplay = replays[currentAgentId];
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current === null) return;
+    const diff = e.changedTouches[0].clientX - touchStartX.current;
+    if (diff > SWIPE_THRESHOLD) goPrev();
+    else if (diff < -SWIPE_THRESHOLD) goNext();
+    touchStartX.current = null;
+  };
+
+  return (
+    <div ref={containerRef} tabIndex={0} className="space-y-3 outline-none">
+      {/* Section header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <MonitorPlay className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-medium">Agent Replays</h2>
+        </div>
+        {agentIds.length > 1 && (
+          <span className="text-xs text-muted-foreground">
+            Shift + Arrow keys to switch agents
+          </span>
+        )}
+      </div>
+
+      {/* Agent tabs */}
+      {agentIds.length > 1 && (
+        <div className="flex items-center gap-1.5">
+          {agentIds.map((id, idx) => (
+            <button
+              key={id}
+              onClick={() => setActiveIdx(idx)}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                idx === activeIdx
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted/50 text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              Agent {id.slice(0, 6)}
+              <span className="ml-1.5 opacity-60">{replays[id].frameCount}f</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Replay viewer */}
+      <Card className="bg-card/50 overflow-hidden">
+        <div
+          className="h-[420px]"
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+        >
+          <ReplayScrubber
+            key={currentAgentId}
+            manifestUrl={currentReplay.manifestUrl}
+            agentLabel={`Agent ${currentAgentId.slice(0, 6)}`}
+          />
+        </div>
+      </Card>
+
+      {/* Prev/Next arrows for multi-agent */}
+      {agentIds.length > 1 && (
+        <div className="flex items-center justify-between">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-1 text-xs text-muted-foreground"
+            onClick={goPrev}
+            disabled={activeIdx === 0}
+          >
+            <ChevronLeft className="size-3.5" />
+            Previous Agent
+          </Button>
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {activeIdx + 1} / {agentIds.length}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-1 text-xs text-muted-foreground"
+            onClick={goNext}
+            disabled={activeIdx === agentIds.length - 1}
+          >
+            Next Agent
+            <ChevronRight className="size-3.5" />
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
