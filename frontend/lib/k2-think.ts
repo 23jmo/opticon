@@ -135,17 +135,15 @@ export async function decomposeTasksWithK2(
   prompt: string,
   agentCount: number
 ): Promise<string[]> {
-  const systemPrompt = `Break the user's request into exactly ${agentCount} independent tasks. Each task will be executed by a separate AI agent with access to a cloud desktop (browser, terminal, file system).
+  const systemPrompt = `You are a JSON API that decomposes user requests into parallelizable tasks. You respond with raw JSON only, never natural language.`;
 
-Respond with ONLY a JSON object in this exact format, no other text:
-{"todos":[{"description":"first task here"},{"description":"second task here"}]}
+  const userPrompt = `Decompose the following request into exactly ${agentCount} independent tasks that AI agents can execute on separate cloud desktops with browsers and terminals.
 
-Requirements:
-- Each task must be specific and actionable
-- Tasks must be independently executable in parallel
-- Tasks should be roughly equal in complexity`;
+Request: ${prompt.trim()}
 
-  const response = await callK2Think(systemPrompt, prompt.trim());
+Return a JSON object with a "todos" array where each item has a "description" field containing a specific, actionable task.`;
+
+  const response = await callK2Think(systemPrompt, userPrompt);
   return parseTodosResponse(response);
 }
 
@@ -157,23 +155,16 @@ export async function refineTasksWithK2(
   currentTasks: string[],
   refinement: string
 ): Promise<string[]> {
-  const systemPrompt = `Update the task list based on the user's refinement request. You may add, remove, or modify tasks.
+  const systemPrompt = `You are a JSON API that modifies task lists. You respond with raw JSON only, never natural language.`;
 
-Respond with ONLY a JSON object in this exact format, no other text:
-{"todos":[{"description":"first task here"},{"description":"second task here"}]}
+  const userPrompt = `Modify this task list based on the refinement request. Return a JSON object with a "todos" array where each item has a "description" field.
 
-Requirements:
-- Each task must be specific and actionable
-- Tasks must be independently executable in parallel
-- Tasks should be roughly equal in complexity
-- Honor the user's refinement request exactly`;
-
-  const userPrompt = `Original prompt: ${originalPrompt}
+Original prompt: ${originalPrompt}
 
 Current tasks:
 ${currentTasks.map((t, i) => `${i + 1}. ${t}`).join("\n")}
 
-User refinement: ${refinement.trim()}`;
+Refinement: ${refinement.trim()}`;
 
   const response = await callK2Think(systemPrompt, userPrompt);
   return parseTodosResponse(response);
