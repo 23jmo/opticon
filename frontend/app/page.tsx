@@ -8,6 +8,29 @@ import { Textarea } from "@/components/ui/textarea";
 import { Loader2, LogOut, History } from "lucide-react";
 import { SessionHistorySidebar } from "@/components/session-history-sidebar";
 
+const PRESET_PROMPTS = [
+  {
+    label: "Browser QA Testing",
+    prompt:
+      "Run automated QA testing of our web app across Chrome, Firefox, and Safari. Check for layout issues, broken links, form validation, and console errors on each browser.",
+  },
+  {
+    label: "Install OpenClaw",
+    prompt:
+      "Install OpenClaw by running: curl -fsSL https://openclaw.ai/install.sh | bash",
+  },
+  {
+    label: "Research Paper",
+    prompt:
+      "Write a comprehensive research paper on Google Docs about the rise of Daedalus Labs",
+  },
+  {
+    label: "Data Dashboard",
+    prompt:
+      "Build an interactive sales dashboard with charts and filters using a spreadsheet app. Include monthly revenue, top products, and regional breakdowns.",
+  },
+];
+
 export default function Home() {
   const { data: authSession } = useSession();
   const [prompt, setPrompt] = useState("");
@@ -199,6 +222,21 @@ export default function Home() {
             </kbd>
             <span className="ml-1.5">to launch</span>
           </p>
+
+          {/* Preset prompts */}
+          <div className="flex flex-wrap justify-center gap-2">
+            {PRESET_PROMPTS.map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                onClick={() => setPrompt(preset.prompt)}
+                disabled={isSubmitting}
+                className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-zinc-700 hover:text-zinc-300 disabled:opacity-50"
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
 
           {/* Demo shortcut */}
           <div className="flex justify-center">
