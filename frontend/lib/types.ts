@@ -143,6 +143,7 @@ export interface ClientToServerEvents {
   "session:join": (sessionId: string) => void;
   "session:leave": (sessionId: string) => void;
   "session:stop": (payload: { sessionId: string }) => void;
+  "session:finish": (payload: { sessionId: string }) => void;
   "session:followup": (payload: SessionFollowUpEvent) => void;
   "agent:join": (payload: AgentJoinEvent) => void;
   "agent:stream_ready": (payload: AgentStreamReadyEvent) => void;

@@ -194,6 +194,13 @@ app.prepare().then(() => {
       console.log(`[server] Session ${sessionId} stopped by user`);
     });
 
+    socket.on("session:finish", (data: { sessionId: string }) => {
+      const { sessionId } = data;
+      console.log(`[socket.io] Finishing session ${sessionId}`);
+      clearIdleTimer(sessionId);
+      finalizeSession(sessionId);
+    });
+
     // --- Follow-up instructions from browser ---
     socket.on("session:followup", async (data: SessionFollowUpEvent) => {
       const { sessionId, prompt } = data;

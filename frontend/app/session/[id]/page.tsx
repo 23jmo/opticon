@@ -54,6 +54,7 @@ function SessionContent() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [whiteboard, setWhiteboard] = useState<string>("");
   const [sessionComplete, setSessionComplete] = useState(false);
+  const [tasksDone, setTasksDone] = useState(false);
   const [isLoading, setIsLoading] = useState(!isMock);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"tabs" | "grid">("tabs");
@@ -63,10 +64,17 @@ function SessionContent() {
     if (socketRef.current) {
       socketRef.current.emit("session:stop", { sessionId });
     }
-    // Update all agents to terminated
     setAgents((prev) =>
       prev.map((agent) => ({ ...agent, status: "terminated" as const }))
     );
+    setSessionComplete(true);
+  }, [sessionId]);
+
+  const handleFinish = useCallback(() => {
+    if (socketRef.current) {
+      socketRef.current.emit("session:finish", { sessionId });
+    }
+    setSessionComplete(true);
   }, [sessionId]);
 
   const handleAgentCommand = useCallback(
@@ -177,13 +185,18 @@ function SessionContent() {
       });
 
       socket.on("task:completed", (data: TaskCompletedEvent) => {
-        setTodos((prev) =>
-          prev.map((t) =>
+        setTodos((prev) => {
+          const updated = prev.map((t) =>
             t.id === data.todoId
               ? { ...t, status: "completed" as const, result: data.result }
               : t
-          )
-        );
+          );
+          // Check if all tasks are now done
+          if (updated.length > 0 && updated.every((t) => t.status === "completed")) {
+            setTasksDone(true);
+          }
+          return updated;
+        });
         setAgents((prev) =>
           prev.map((a) =>
             a.id === data.agentId
@@ -317,6 +330,10 @@ function SessionContent() {
         }));
       });
 
+      socket.on("session:tasks_done", () => {
+        setTasksDone(true);
+      });
+
       socket.on("session:complete", () => {
         setSessionComplete(true);
       });
@@ -382,7 +399,7 @@ function SessionContent() {
       {sessionComplete && (
         <div className="shrink-0 border-b border-emerald-500/20 bg-emerald-500/10 px-5 py-3 flex items-center justify-between">
           <p className="text-sm text-emerald-400 font-medium">
-            All agents have completed their tasks
+            Session finished
           </p>
           <button
             onClick={() => router.push(`/session/${sessionId}/summary`)}
@@ -393,12 +410,34 @@ function SessionContent() {
         </div>
       )}
 
+      {/* Tasks done banner (all tasks complete, agents still alive for follow-ups) */}
+      {tasksDone && !sessionComplete && (
+        <div className="shrink-0 border-b border-emerald-500/20 bg-emerald-500/10 px-5 py-3 flex items-center justify-between">
+          <p className="text-sm text-emerald-400 font-medium">
+            All tasks completed — agents are standing by for follow-up instructions
+          </p>
+          <button
+            onClick={handleFinish}
+            className="text-sm text-emerald-400 hover:text-emerald-300 font-medium transition-colors border border-emerald-500/30 rounded-md px-3 py-1"
+          >
+            Finish Session
+          </button>
+        </div>
+      )}
+
       {/* Prompt bar */}
       <PromptBar
         prompt={prompt}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         onStop={handleStop}
+        tasksComplete={tasksDone || sessionComplete}
+        onFollowUp={(text) => {
+          if (socketRef.current) {
+            socketRef.current.emit("session:followup", { sessionId, prompt: text });
+            setTasksDone(false);
+          }
+        }}
       />
 
       {/* Main content: browser/grid + thinking sidebar */}
