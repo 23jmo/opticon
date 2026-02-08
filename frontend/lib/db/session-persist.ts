@@ -46,24 +46,21 @@ export async function persistTodos(sessionId: string, todoList: Todo[]) {
  * Deletes all existing todos and inserts new ones in a transaction
  */
 export async function replaceTodos(sessionId: string, todoList: Todo[]) {
-  await db.transaction(async (tx) => {
-    // Delete existing todos
-    await tx.delete(todos).where(eq(todos.sessionId, sessionId));
+  // neon-http doesn't support transactions — run as sequential queries
+  await db.delete(todos).where(eq(todos.sessionId, sessionId));
 
-    // Insert new todos
-    if (todoList.length > 0) {
-      await tx.insert(todos).values(
-        todoList.map((todo) => ({
-          id: todo.id,
-          sessionId,
-          description: todo.description,
-          status: todo.status,
-          assignedTo: todo.assignedTo || null,
-          result: todo.result || null,
-        }))
-      );
-    }
-  });
+  if (todoList.length > 0) {
+    await db.insert(todos).values(
+      todoList.map((todo) => ({
+        id: todo.id,
+        sessionId,
+        description: todo.description,
+        status: todo.status,
+        assignedTo: todo.assignedTo || null,
+        result: todo.result || null,
+      }))
+    );
+  }
 }
 
 /**
