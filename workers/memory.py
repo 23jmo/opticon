@@ -34,7 +34,7 @@ class MemoryManager:
                 "llm": {
                     "provider": "openai",
                     "config": {
-                        "model": "anthropic/claude-sonnet-4-5-20250929",
+                        "model": "openai/gpt-4.1-nano",
                         "api_key": os.environ.get("DEDALUS_API_KEY", ""),
                         "openai_base_url": "https://api.dedaluslabs.ai/v1",
                     },
