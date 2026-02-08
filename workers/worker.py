@@ -31,6 +31,7 @@ MODEL = "anthropic/claude-sonnet-4-5-20250929"
 MAX_STEPS = 500
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 2  # seconds
+HISTORY_KEEP_RECENT = 10  # number of recent screenshot/action exchanges to keep verbatim
 
 
 def make_screenshot_message():
