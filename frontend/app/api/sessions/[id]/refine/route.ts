@@ -2,7 +2,18 @@ import { NextResponse } from "next/server";
 import { getSession, updateTodos } from "@/lib/session-store";
 import { auth } from "@/auth";
 import { persistTodos } from "@/lib/db/session-persist";
-import { refineTasksWithK2 } from "@/lib/k2-think";
+import Dedalus from "dedalus-labs";
+import { DedalusRunner } from "dedalus-labs";
+
+let runner: DedalusRunner | null = null;
+
+function getRunner(): DedalusRunner {
+  if (!runner) {
+    const client = new Dedalus({ apiKey: process.env.DEDALUS_API_KEY });
+    runner = new DedalusRunner(client);
+  }
+  return runner;
+}
 
 export async function POST(
   request: Request,
@@ -44,13 +55,35 @@ export async function POST(
     );
   }
 
-  // Use K2 Think to refine the task list with advanced reasoning
+  // Use Claude Sonnet to refine the task list
   let todoDescriptions: string[];
   try {
-    todoDescriptions = await refineTasksWithK2(
-      session.prompt,
-      currentTasks,
-      refinement.trim()
+    const response = await getRunner().run({
+      input: `Original prompt: ${session.prompt}
+
+Current tasks:
+${currentTasks.map((t, i) => `${i + 1}. ${t}`).join("\n")}
+
+User refinement: ${refinement.trim()}`,
+      model: "anthropic/claude-sonnet-4-5-20250929",
+      instructions: `You are a task refinement engine. Given the original prompt, current task list, and a user refinement request, update the task list accordingly.
+
+Rules:
+- Each task must be independently executable
+- Tasks should be roughly equal in complexity
+- Return ONLY valid JSON: { "todos": [{ "description": "..." }] }
+- Honor the user's refinement request (add tasks, modify existing ones, remove tasks, etc.)
+- Be specific and actionable in each task description`,
+      max_tokens: 1024,
+    });
+
+    const raw = (response as { finalOutput: string }).finalOutput
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/```\s*$/, "")
+      .trim();
+    const parsed = JSON.parse(raw);
+    todoDescriptions = parsed.todos.map(
+      (t: { description: string }) => t.description
     );
   } catch (error) {
     console.error("[refine] Failed to refine tasks:", error);
