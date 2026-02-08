@@ -157,34 +157,7 @@ export function AgentBrowser({
             })}
           </div>
 
-          {/* Chat input */}
-          {!isWhiteboardTab && (
-            <div className="shrink-0 border-t border-border bg-card px-3 py-2">
-              <div className="flex items-center gap-2">
-                <Input
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendCommand();
-                    }
-                  }}
-                  placeholder="Send a command to this agent..."
-                  className="h-8 text-sm bg-background"
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-8 shrink-0 text-muted-foreground hover:text-primary"
-                  onClick={handleSendCommand}
-                  disabled={!chatInput.trim()}
-                >
-                  <Send className="size-3.5" />
-                </Button>
-              </div>
-            </div>
-          )}
+          {/* Chat input removed — follow-up instructions go through the prompt bar */}
         </>
       )}
     </div>

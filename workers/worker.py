@@ -299,21 +299,34 @@ async def main():
             )
 
     finally:
-        # Upload replay frames before killing sandbox
-        if replay_buffer.frame_count > 0 and r2_public_url:
+        # Save/upload replay frames before killing sandbox
+        if replay_buffer.frame_count > 0:
             try:
-                upload_result = await replay_buffer.upload(
-                    session_id, agent_id, socket_url, r2_public_url
-                )
+                if r2_public_url:
+                    # R2 mode: upload via presigned URLs
+                    upload_result = await replay_buffer.upload_r2(
+                        session_id, agent_id, socket_url, r2_public_url
+                    )
+                else:
+                    # Local mode: save to disk, serve via API route
+                    replay_dir = os.environ.get(
+                        "REPLAY_DIR",
+                        os.path.join(os.path.dirname(__file__), "..", "frontend", ".replays"),
+                    )
+                    serve_base = f"{socket_url}/api/replay/serve"
+                    upload_result = replay_buffer.save_local(
+                        session_id, agent_id, replay_dir, serve_base
+                    )
+
                 if upload_result:
                     manifest_url, frame_count = upload_result
                     await emit("replay:complete", {
                         "manifestUrl": manifest_url,
                         "frameCount": frame_count,
                     })
-                    logger.info("Replay uploaded: %d frames", frame_count)
+                    logger.info("Replay saved: %d frames", frame_count)
             except Exception as e:
-                logger.error("Failed to upload replay: %s", e)
+                logger.error("Failed to save replay: %s", e)
 
         if desktop:
             desktop.kill()
