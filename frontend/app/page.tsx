@@ -14,24 +14,24 @@ import Link from "next/link";
 
 const EXAMPLE_PROMPTS = [
   {
-    label: "Open Google.com",
+    label: "Browser QA Testing",
     prompt:
-      "Open Google.com in the browser, search for 'latest AI research papers 2026', and compile a summary of the top 5 results with titles, authors, and key findings into a text document on the desktop.",
+      "Run automated QA testing of our web app across Chrome, Firefox, and Safari. Check for layout issues, broken links, form validation, and console errors on each browser.",
   },
   {
-    label: "Deep research",
+    label: "Install OpenClaw",
     prompt:
-      "Conduct deep research on the current state of quantum computing in 2026. Search multiple sources including academic papers, tech news sites, and company announcements. Create a comprehensive Google Doc that covers recent breakthroughs, major players, commercial applications, and future outlook with citations.",
+      "Install OpenClaw by running: curl -fsSL https://openclaw.ai/install.sh | bash",
   },
   {
-    label: "Coordinated research paper",
+    label: "Research Paper",
     prompt:
-      "Write a coordinated research paper on the environmental and economic impact of large language models. Agent 1 should research energy consumption and carbon footprint data. Agent 2 should research economic benefits and productivity gains. Then combine findings into a well-structured paper with an abstract, introduction, methodology, findings, and conclusion in Google Docs.",
+      "Write a comprehensive research paper on Google Docs about the rise of Daedalus Labs",
   },
   {
-    label: "Competitive analysis",
+    label: "Data Dashboard",
     prompt:
-      "Perform a competitive analysis of the top 4 AI coding assistants (GitHub Copilot, Cursor, Claude Code, Windsurf). Each agent should research one tool — gathering pricing, features, user reviews, and limitations. Compile everything into a comparison spreadsheet and a summary document with recommendations.",
+      "Build an interactive sales dashboard with charts and filters using a spreadsheet app. Include monthly revenue, top products, and regional breakdowns.",
   },
 ];
 
