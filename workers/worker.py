@@ -76,6 +76,55 @@ async def call_with_retry(client, **kwargs):
             await asyncio.sleep(delay)
 
 
+def trim_message_history(messages):
+    """Keep system + task messages and only the last N exchanges.
+
+    The message list follows a repeating pattern after the first two entries
+    (system, task):
+        user (screenshot) -> assistant (tool call) -> tool (result)
+    Each group of 3 is one "exchange".  We keep the first 2 messages (system
+    prompt + task description) plus the most recent HISTORY_KEEP_RECENT
+    exchanges verbatim. Older exchanges are replaced by a single compact
+    text summary so the model retains awareness of what it already did
+    without the cost of carrying base64 screenshots.
+    """
+    prefix_len = 2  # system + task
+    body = messages[prefix_len:]
+    exchange_size = 3  # screenshot msg, assistant msg, tool result msg
+    keep_count = HISTORY_KEEP_RECENT * exchange_size
+
+    if len(body) <= keep_count:
+        return  # nothing to trim
+
+    old_part = body[: len(body) - keep_count]
+    recent_part = body[len(body) - keep_count:]
+
+    # Build a compact summary of old exchanges
+    summaries = []
+    for msg in old_part:
+        role = msg.get("role", "")
+        if role == "assistant":
+            tool_calls = msg.get("tool_calls") or []
+            for tc in tool_calls:
+                fn = tc.get("function", {})
+                summaries.append(f"- {fn.get('name', '?')}({fn.get('arguments', '')})")
+        elif role == "tool":
+            content = msg.get("content", "")
+            if content:
+                summaries.append(f"  -> {content[:120]}")
+
+    summary_text = (
+        f"[History summary: you already performed {len(old_part) // exchange_size} "
+        f"actions on this task. Recent actions:\n"
+        + "\n".join(summaries[-20:])  # keep last 20 summary lines to stay compact
+        + "\n]"
+    )
+
+    messages[prefix_len:] = [
+        {"role": "user", "content": summary_text},
+    ] + recent_part
+
+
 async def run_agent_loop(client, task_description, whiteboard_content="", user_memories="", on_step=None, replay_buffer=None, terminated=None):
     """
     Observe-think-act loop using Dedalus chat.completions.create().
@@ -108,6 +157,9 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
         if terminated is not None and terminated.is_set():
             logger.info("Terminated during task at step %d", step)
             return "(terminated by user)"
+
+        # Trim old exchanges to keep context window lean
+        trim_message_history(messages)
 
         # Observe: take screenshot and show it to the model
         screenshot_msg, raw_png = make_screenshot_message()
@@ -225,7 +277,7 @@ async def main():
     # --- Boot E2B sandbox ---
     desktop = None
     try:
-        desktop = Sandbox.create()
+        desktop = Sandbox.create(timeout=1200)
         desktop.stream.start()
         stream_url = desktop.stream.get_url()
         await emit("agent:stream_ready", {"streamUrl": stream_url})
