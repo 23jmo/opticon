@@ -269,7 +269,10 @@ function SessionContent() {
           toolName: data.toolName,
           toolArgs: data.toolArgs,
         };
-        setThinkingEntries((prev) => [...prev, entry]);
+        setThinkingEntries((prev) => {
+          if (prev.some((e) => e.id === entry.id)) return prev;
+          return [...prev, entry];
+        });
       });
 
       socket.on("agent:reasoning", (data: AgentReasoningEvent) => {
@@ -484,6 +487,7 @@ function SessionContent() {
               agentActivities={MOCK_AGENT_ACTIVITIES}
               onSelectAgent={handleGridSelectAgent}
               onAgentCommand={handleAgentCommand}
+              sessionId={sessionId}
             />
           )}
         </div>
