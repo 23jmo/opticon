@@ -1,15 +1,11 @@
 /**
  * K2 Think API client for task decomposition
  * Using IFM's advanced reasoning model
- *
- * API is OpenAI-compatible. Try these endpoints in order:
- * 1. https://k2think.ai/v1/chat/completions (k2think.ai)
- * 2. https://api.k2think.ai/v1/chat/completions (subdomain)
- * 3. https://api.openai.com/v1/chat/completions (fallback with custom base)
  */
 
-const K2_API_URL = process.env.K2_API_URL || "https://k2think.ai/v1/chat/completions";
+const K2_API_URL = process.env.K2_API_URL || "https://api.k2think.ai/v1/chat/completions";
 const K2_API_KEY = process.env.K2_THINK_API_KEY || "IFM-Zps61SP4gl0nSMPE";
+const K2_MODEL = "MBZUAI-IFM/K2-Think-v2";
 
 interface K2Message {
   role: "system" | "user" | "assistant";
@@ -46,14 +42,14 @@ export async function callK2Think(
     const response = await fetch(K2_API_URL, {
       method: "POST",
       headers: {
+        "accept": "application/json",
+        "Authorization": `Bearer ${K2_API_KEY}`,
         "Content-Type": "application/json",
-        Authorization: `Bearer ${K2_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "k2-think",
+        model: K2_MODEL,
         messages,
-        max_tokens: maxTokens,
-        temperature: 0.7,
+        stream: false,
       }),
     });
 
