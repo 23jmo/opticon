@@ -4,6 +4,8 @@ import { auth } from "@/auth";
 import { persistTodos } from "@/lib/db/session-persist";
 import { refineTasksWithK2 } from "@/lib/k2-think";
 
+export const dynamic = "force-dynamic";
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }

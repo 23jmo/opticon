@@ -111,7 +111,6 @@ function AgentGridCell({
             sessionId={sessionId || ""}
             streamUrl={agent.streamUrl}
             isActive={true}
-            isInteractive={false}
           />
         ) : (
           <AgentScreen

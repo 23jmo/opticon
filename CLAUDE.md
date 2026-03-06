@@ -1,85 +1,135 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
-Multi-agent VM orchestration platform. Users submit prompts, an orchestrator (Claude API) decomposes them into independent tasks, and multiple AI agents each control their own E2B cloud desktop sandbox to execute tasks in parallel. Live desktop streams and agent reasoning are shown in the browser.
-
-Full specification: `SPEC.md`
+**Panopticon** — multi-agent VM orchestration platform. Users submit prompts, an orchestrator decomposes them into independent tasks, and multiple AI agents each control their own E2B cloud desktop sandbox in parallel. Live desktop streams and agent reasoning are shown in the browser.
 
 ## Architecture
 
 **Two-process architecture:**
-- **Next.js app** (TypeScript): Frontend + API routes + Socket.io server + orchestrator
-- **Python agent workers** (separate processes): Daedalus Labs SDK + E2B Desktop SDK for computer-use
+- **Next.js app** (`frontend/`): Custom server (`server.ts`) with Socket.io, API routes, orchestrator, auth, billing
+- **Python agent workers** (`workers/`): Spawned as child processes by the backend, communicate via Socket.io events
 
-**Key integration points:**
-- Next.js backend spawns Python worker processes and communicates via shared TODO file on disk
-- Backend pushes task assignments to workers (push model, not pull)
-- Workers use Daedalus SDK as the agent brain with custom MCP tools wrapping E2B Desktop SDK
-- E2B's built-in streaming SDK handles desktop video; Socket.io handles all other real-time data
-- In-memory TODO whiteboard on the backend (no database for MVP)
+**Layers:**
+- **Auth**: NextAuth 5 (beta) with Google OAuth + email/password credentials, JWT sessions, Drizzle adapter
+- **Database**: Neon PostgreSQL via Drizzle ORM — persists users, sessions, todos, replays
+- **Billing**: Flowglad (`@flowglad/nextjs`) — free tier (2 agents), pro tier (4 agents)
+- **Memory**: Mem0 + HuggingFace embeddings + local Qdrant vector store — per-user memory across sessions
+- **Real-time**: Socket.io (one room per session) — all IPC between server and workers
+- **Replay**: Screenshot capture during agent loops, stored locally or uploaded to R2
+
+**Two worker modes:**
+- `worker.py` — manual screenshot-LLM-tool loop using `dedalus_labs` + `e2b_tools`
+- `worker_mcp.py` — delegates to `DedalusRunner` with MCP server (`mcp_server.py`) wrapping E2B tools with DAuth
 
 ## Tech Stack
 
-- **Frontend**: Next.js 14+ App Router, Tailwind CSS, shadcn/ui
-- **Real-time**: Socket.io (one room per session)
-- **Agent brain**: Daedalus Labs Python SDK (`dedalus_labs` pip package)
-- **Computer use**: E2B Desktop Python SDK (`e2b-desktop` pip package)
-- **Orchestrator**: Dedalus Labs TypeScript SDK (`dedalus-labs` npm package)
-- **Desktop streaming**: E2B built-in streaming
-- **Deployment**: Local development only
+- **Framework**: Next.js 16.1.6, React 19, TypeScript
+- **Styling**: Tailwind CSS 4, shadcn/ui, React Compiler (`babel-plugin-react-compiler`)
+- **Database**: Drizzle ORM + Neon PostgreSQL (`@neondatabase/serverless`)
+- **Auth**: NextAuth 5 beta (`next-auth@5.0.0-beta.30`) + Google OAuth
+- **Billing**: Flowglad (`@flowglad/nextjs`)
+- **Real-time**: Socket.io 4.8
+- **Agent brain**: Dedalus Labs Python SDK (`dedalus_labs`)
+- **Computer use**: E2B Desktop Python SDK (`e2b-desktop`)
+- **Orchestrator**: Dedalus Labs TS SDK (`dedalus-labs`)
+- **Testing**: Vitest
+
+## Directory Structure
+
+```
+/frontend                          # Next.js app (all frontend + backend code)
+  /app                             # App Router pages and layouts
+    /api/auth                      # NextAuth routes
+    /api/sessions                  # Session CRUD, approval, history
+    /api/flowglad                  # Billing webhook catch-all
+    /api/replay                    # Replay upload URLs, serving, mock
+    /auth                          # Sign-in / sign-up pages
+    /session/[id]                  # Live session view, approval, summary
+    /pricing                       # Pricing page
+  /components                      # React components
+    /ui                            # shadcn/ui primitives
+    /kanban                        # Kanban board (task management)
+  /lib
+    /db                            # Drizzle schema, persistence helpers
+      schema.ts                    # Tables: users, accounts, sessions, todos, replays
+      session-persist.ts           # Session/todo DB writes
+      replay-persist.ts            # Replay DB writes
+      index.ts                     # DB client
+    orchestrator.ts                # Task decomposition via Dedalus/Claude
+    session-store.ts               # In-memory session state
+    worker-manager.ts              # Spawns Python worker processes
+    types.ts                       # All TypeScript types + Socket.io event contracts
+    billing.ts, billing-constants.ts  # Flowglad billing helpers
+    socket.ts, socket-client.ts    # Socket.io server/client setup
+  auth.ts                          # NextAuth config (Google + Credentials)
+  middleware.ts                    # Auth middleware (protects non-public routes)
+  server.ts                        # Custom HTTP server (Next.js + Socket.io)
+  env.ts                           # Loads .env.local via dotenv
+
+/workers                           # Python agent workers
+  worker.py                        # Simple mode: manual loop
+  worker_mcp.py                    # MCP mode: DedalusRunner + MCP server
+  mcp_server.py                    # MCP server wrapping E2B Desktop tools
+  e2b_tools.py                     # E2B tool schemas + execution
+  memory.py                        # Mem0 memory manager
+  replay.py                        # Screenshot replay buffer
+  /tools                           # MCP tool wrappers
+```
 
 ## Common Commands
 
 ```bash
-# Frontend
-npm install              # Install JS dependencies
-npm run dev              # Start Next.js dev server
-npm run build            # Production build
-npm run lint             # ESLint
+# Frontend (run from /frontend)
+cd frontend
+npm install                        # Install JS dependencies
+npm run dev                        # Start dev server (tsx --import ./env.ts server.ts)
+npm run build                      # Production build
+npm run lint                       # ESLint
+npm run test                       # Vitest
 
-# Python workers
-pip install -r requirements.txt   # Install Python deps
-python worker.py                  # Start a single agent worker (invoked by backend)
+# Python workers (spawned automatically by backend via worker-manager.ts)
+pip install -r workers/requirements.txt   # Install Python deps
 ```
+
+Note: `npm run dev` runs a custom server (`server.ts`) that creates an HTTP server with both Next.js and Socket.io attached — not the default `next dev`.
 
 ## Environment Variables
 
-Required in `.env.local`:
+Required in `frontend/.env.local`:
 ```
-DEDALUS_API_KEY=         # Dedalus Labs SDK (orchestrator + agent workers)
-E2B_API_KEY=             # E2B sandbox provisioning
-```
-
-## Directory Structure Conventions
-
-```
-/app                     # Next.js App Router pages and layouts
-/app/api                 # API routes (orchestrator, session management)
-/components              # React components (home screen, VM tabs, thinking panel)
-/lib                     # Shared utilities (socket setup, types, orchestrator logic)
-/workers                 # Python agent worker code
-/workers/tools           # MCP tool wrappers for E2B Desktop SDK
+DEDALUS_API_KEY=           # Dedalus Labs SDK (orchestrator + agent workers)
+E2B_API_KEY=               # E2B sandbox provisioning
+DATABASE_URL=              # Neon PostgreSQL connection string
+AUTH_GOOGLE_ID=            # Google OAuth client ID
+AUTH_GOOGLE_SECRET=        # Google OAuth client secret
+AUTH_SECRET=               # NextAuth secret for JWT signing
 ```
 
-## Key Design Decisions
+Optional:
+```
+PYTHON_PATH=               # Path to Python binary (default: python3)
+R2_PUBLIC_URL=             # Cloudflare R2 base URL for replay storage
+REPLAY_DIR=                # Local replay storage directory (default: frontend/.replays)
+MCP_PORT=                  # MCP server port for worker_mcp.py (default: 8765)
+FLOWGLAD_SECRET_KEY=       # Flowglad billing API key
+```
 
-- **Agents run outside sandboxes**: Daedalus agents run as Python processes on the host, sending computer-use commands to E2B sandboxes remotely (not installed inside VMs)
-- **Backend assigns tasks**: Agents don't pull tasks. The backend manages the TODO whiteboard and pushes assignments. This avoids race conditions without distributed locking.
-- **Separate Python processes**: Each agent worker is its own Python process for isolation. IPC uses a shared file.
-- **Socket.io rooms**: One room per session for scoped real-time events. Events: `task:created`, `task:assigned`, `task:completed`, `agent:thinking`, `agent:reasoning`, `agent:terminated`, `session:complete`
-- **No auth for MVP**: API keys are server-side. No user authentication.
-- **Session persistence**: Sessions survive browser tab close (agents keep running). Reconnection supported via session ID.
+## Key Constants
 
-## Agent Computer-Use Loop
+- **Agent model**: `anthropic/claude-sonnet-4-5-20250929`
+- **Orchestrator model**: `anthropic/claude-sonnet-4-20250514`
+- **MAX_STEPS**: 500 (max actions per task in worker.py)
+- **HISTORY_KEEP_RECENT**: 10 (recent screenshot/action exchanges kept verbatim; older ones summarized)
+- **Screenshot compression**: JPEG quality 75
+- **API retries**: Exponential backoff, max 3 attempts (base delay 2s)
+- **Billing**: Free = 2 agents, Pro = 4 agents (`PRO_FEATURE_SLUG = "max_agents_4"`)
+- **Idle timeout**: 5 minutes after all tasks complete before session finalizes
 
-Each agent worker follows this cycle:
-1. `sandbox.screenshot()` → capture current desktop state
-2. Send screenshot to Daedalus/Claude for reasoning
-3. Receive action decision (click, type, press key, etc.)
-4. Execute action via E2B Desktop SDK (`left_click`, `write`, `press`)
-5. Stream thinking + action log to backend via Socket.io
-6. Repeat until task is complete
-7. Report completion → receive next task or terminate
+## Socket.io Events
+
+**Server -> Client (browser):**
+`task:created`, `task:assigned`, `task:completed`, `task:assign`, `task:none`, `agent:join`, `agent:thinking`, `agent:reasoning`, `agent:stream_ready`, `agent:error`, `agent:terminated`, `session:complete`, `session:tasks_done`, `whiteboard:updated`, `replay:ready`
+
+**Client -> Server:**
+`session:join`, `session:leave`, `session:stop`, `session:finish`, `session:followup`, `agent:join`, `agent:stream_ready`, `agent:thinking`, `agent:reasoning`, `agent:error`, `task:completed`, `agent:terminated`, `whiteboard:updated`, `replay:complete`

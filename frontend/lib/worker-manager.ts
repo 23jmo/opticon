@@ -11,8 +11,8 @@ import type { Agent } from "./types";
 // Track worker processes per session
 const workerProcesses = new Map<string, Map<string, ChildProcess>>();
 
-// process.cwd() returns frontend/ in Next.js dev; go up one level to project root
-const PROJECT_ROOT = path.resolve(process.cwd(), "..");
+// In dev, cwd is frontend/ so go up one level. In Docker, cwd is /app and workers/ is a sibling.
+const PROJECT_ROOT = process.env.PROJECT_ROOT || path.resolve(process.cwd(), "..");
 
 export function spawnWorkers(sessionId: string, agentCount: number): void {
   const session = getSession(sessionId);

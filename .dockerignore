@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+.env*
+*.md
+.memories
+.replays
+frontend/node_modules
+frontend/.next

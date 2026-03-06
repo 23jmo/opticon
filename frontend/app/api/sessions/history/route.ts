@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { getUserSessionsWithTodos } from "@/lib/db/session-persist";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const authSession = await auth();
   if (!authSession?.user?.id) {

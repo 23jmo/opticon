@@ -1,0 +1,4 @@
+# Optional: enables per-user memory (Mem0 + HuggingFace embeddings)
+# Install with: pip install -r requirements-memory.txt
+mem0ai>=0.1.0
+sentence-transformers>=2.0.0

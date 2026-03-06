@@ -3,6 +3,8 @@ import { v4 as uuidv4 } from "uuid";
 import { createSession, addTodos, getSession } from "@/lib/session-store";
 import { auth } from "@/auth";
 import { getMaxAgentsForUser } from "@/lib/billing";
+
+export const dynamic = "force-dynamic";
 import {
   persistSession,
   persistTodos,

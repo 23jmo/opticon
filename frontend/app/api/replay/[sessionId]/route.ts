@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSessionReplays, scanLocalReplays } from "@/lib/db/replay-persist";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ sessionId: string }> }
