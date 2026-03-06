@@ -33,6 +33,18 @@ const EXAMPLE_PROMPTS = [
     prompt:
       "Build an interactive sales dashboard with charts and filters using a spreadsheet app. Include monthly revenue, top products, and regional breakdowns.",
   },
+  {
+    label: "Long-Term AI Research",
+    prompt:
+      "Conduct extensive research on the latest AI agent frameworks, spend several hours browsing papers, GitHub repos, and documentation. Create a detailed comparison matrix in a spreadsheet.",
+    panopticon: true,
+  },
+  {
+    label: "Market Analysis Deep-Dive",
+    prompt:
+      "Research the competitive landscape for AI development tools. Monitor pricing changes, feature releases, and community sentiment across 10+ companies for multiple hours. Track everything in a comprehensive document.",
+    panopticon: true,
+  },
 ];
 
 export default function Home() {
@@ -125,6 +137,11 @@ export default function Home() {
               {authSession.user.name || authSession.user.email}
             </span>
             <PlanBadge />
+            <Link href="/panopticon">
+              <Button variant="ghost" size="sm" className="text-zinc-500 hover:text-zinc-300 text-xs">
+                Panopticon
+              </Button>
+            </Link>
             <Link href="/pricing">
               <Button variant="ghost" size="sm" className="text-zinc-500 hover:text-zinc-300 text-xs">
                 Pricing

@@ -10,7 +10,8 @@ export function createSession(
   id: string,
   prompt: string,
   agentCount: number,
-  userId?: string
+  userId?: string,
+  isPanopticon: boolean = false
 ): Session {
   const session: Session = {
     id,
@@ -22,6 +23,7 @@ export function createSession(
     createdAt: Date.now(),
     whiteboard: "",
     userId,
+    isPanopticon,
   };
   sessions.set(id, session);
   return session;
@@ -162,4 +164,41 @@ export function updateAgentStreamUrl(
   if (!session) return;
   const agent = session.agents.find((a) => a.id === agentId);
   if (agent) agent.streamUrl = streamUrl;
+}
+
+// Panopticon-specific functions
+export function setSession(sessionId: string, session: Session): void {
+  sessions.set(sessionId, session);
+}
+
+export function getUserSessions(userId: string): Session[] {
+  const userSessions = Array.from(sessions.values()).filter(
+    (session) => session.userId === userId
+  );
+  return userSessions.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export function getPanopticonSessions(userId: string): Session[] {
+  return getUserSessions(userId).filter((session) => session.isPanopticon);
+}
+
+export function getSessionStore() {
+  return {
+    setSession,
+    getSession,
+    getUserSessions,
+    getPanopticonSessions,
+    createSession,
+    addTodos,
+    updateTodos,
+    approveSession,
+    assignTask,
+    completeTask,
+    getNextPendingTask,
+    addAgent,
+    updateAgentStatus,
+    getWhiteboard,
+    updateWhiteboard,
+    updateAgentStreamUrl,
+  };
 }

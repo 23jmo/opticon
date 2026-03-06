@@ -44,6 +44,7 @@ export interface Session {
   createdAt: number;
   whiteboard?: string;
   userId?: string;
+  isPanopticon?: boolean;
 }
 
 // Socket.io event payload types
@@ -100,6 +101,12 @@ export interface AgentTerminatedEvent {
   agentId: string;
 }
 
+export interface AgentThumbnailEvent {
+  agentId: string;
+  thumbnail: string;
+  timestamp: number;
+}
+
 export interface SessionCompleteEvent {
   sessionId: string;
 }
@@ -128,6 +135,7 @@ export interface ServerToClientEvents {
   "agent:stream_ready": (payload: AgentStreamReadyEvent) => void;
   "agent:error": (payload: AgentErrorEvent) => void;
   "agent:terminated": (payload: AgentTerminatedEvent) => void;
+  "agent:thumbnail": (payload: AgentThumbnailEvent) => void;
   "session:complete": (payload: SessionCompleteEvent) => void;
   "session:tasks_done": (payload: SessionTasksDoneEvent) => void;
   "whiteboard:updated": (payload: WhiteboardUpdatedEvent) => void;

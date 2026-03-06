@@ -356,6 +356,12 @@ function SessionContent() {
         );
       });
 
+      socket.on("agent:thumbnail", (data: { agentId: string; thumbnail: string; timestamp: number }) => {
+        // Handle thumbnail updates for mobile UI
+        // This could be used to update a thumbnail cache if needed
+        console.log("Thumbnail update for", data.agentId);
+      });
+
       socket.on("whiteboard:updated", (data: WhiteboardUpdatedEvent) => {
         setWhiteboard(data.content);
       });

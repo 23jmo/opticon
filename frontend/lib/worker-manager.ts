@@ -45,6 +45,8 @@ export function spawnWorkers(sessionId: string, agentCount: number): void {
         SOCKET_URL: `http://localhost:${process.env.PORT || "3000"}`,
         E2B_API_KEY: process.env.E2B_API_KEY || "",
         DEDALUS_API_KEY: process.env.DEDALUS_API_KEY || "",
+        // Panopticon: Enable long-running mode for Panopticon sessions
+        PANOPTICON_MODE: session.isPanopticon ? "true" : "false",
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
