@@ -34,6 +34,16 @@ import {
 } from "./lib/db/session-persist";
 import { persistReplay } from "./lib/db/replay-persist";
 import { decomposeTasks } from "./lib/orchestrator";
+import { createSlackApp } from "./lib/slack/app";
+import {
+  postMilestoneToSlack,
+  postCompletionToSlack,
+  postErrorToSlack,
+} from "./lib/slack/app";
+import {
+  getSlackSessionBySessionId,
+  completeSlackSession,
+} from "./lib/slack/session-adapter";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "localhost";
@@ -51,6 +61,10 @@ const stoppingSessions = new Set<string>();
 
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const STOP_TIMEOUT_MS = 30 * 1000; // 30 seconds max wait for worker cleanup
+const SLACK_MILESTONE_THROTTLE_MS = 15_000; // Min 15s between Slack milestone posts per session
+
+/** Last Slack milestone post time per sessionId, for throttling */
+const lastSlackMilestone = new Map<string, number>();
 
 app.prepare().then(() => {
   const httpServer = createServer(handler);
@@ -65,6 +79,18 @@ app.prepare().then(() => {
   );
 
   setIO(io);
+
+  // --- Start Slack bot (if configured) ---
+  if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
+    const slack = createSlackApp();
+    slack.start().then(() => {
+      console.log("[server] Slack bot started (Socket Mode)");
+    }).catch((err) => {
+      console.error("[server] Failed to start Slack bot:", err);
+    });
+  } else {
+    console.log("[server] Slack bot disabled (SLACK_BOT_TOKEN / SLACK_APP_TOKEN not set)");
+  }
 
   /**
    * Start (or restart) the 5-minute idle shutdown timer for a session.
@@ -116,6 +142,23 @@ app.prepare().then(() => {
     persistSessionStatus(sessionId, "completed", new Date()).catch(
       console.error
     );
+
+    // Notify Slack if this session is linked to a thread
+    const slackSession = getSlackSessionBySessionId(sessionId);
+    if (slackSession) {
+      const whiteboard = getWhiteboard(sessionId);
+      const todoCount = session.todos.length;
+      const agentCount = session.agents.length;
+      postCompletionToSlack({
+        sessionId,
+        threadTs: slackSession.threadTs,
+        channelId: slackSession.channelId,
+        summary: whiteboard || `Completed ${todoCount} task(s).`,
+      }).catch(console.error);
+      completeSlackSession(slackSession.threadTs, slackSession.channelId).catch(
+        console.error
+      );
+    }
   }
 
   /**
@@ -342,6 +385,21 @@ app.prepare().then(() => {
         toolName: data.toolName,
         toolArgs: data.toolArgs,
       });
+
+      // Post milestone to Slack (throttled: tool-use actions, max once per 15s per session)
+      if (data.toolName && getSlackSessionBySessionId(sessionId)) {
+        const now = Date.now();
+        const last = lastSlackMilestone.get(sessionId) || 0;
+        if (now - last >= SLACK_MILESTONE_THROTTLE_MS) {
+          lastSlackMilestone.set(sessionId, now);
+          const session = getSession(sessionId);
+          const agent = session?.agents.find((a) => a.id === data.agentId);
+          const agentName = agent?.name || `Agent ${data.agentId.slice(0, 6)}`;
+          postMilestoneToSlack(sessionId, agentName, data.action).catch(
+            console.error
+          );
+        }
+      }
     });
 
     socket.on("agent:reasoning", (data: AgentReasoningEvent) => {
@@ -365,6 +423,11 @@ app.prepare().then(() => {
         agentId: data.agentId,
         error: data.error,
       });
+
+      // Post error to Slack for human-in-the-loop recovery
+      if (getSlackSessionBySessionId(sessionId)) {
+        postErrorToSlack(sessionId, data.error).catch(console.error);
+      }
     });
 
     socket.on("task:completed", (data: TaskCompletedEvent) => {
