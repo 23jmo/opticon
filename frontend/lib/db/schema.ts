@@ -92,6 +92,22 @@ export const slackThreadSessions = pgTable("slack_thread_sessions", {
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 });
 
+export const agents = pgTable("agents", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id")
+    .notNull()
+    .references(() => sessions.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  status: text("status").notNull(),
+  sandboxId: text("sandbox_id"),
+  streamUrl: text("stream_url"),
+  currentTaskId: text("current_task_id"),
+  tasksCompleted: integer("tasks_completed").default(0).notNull(),
+  tasksTotal: integer("tasks_total").default(0).notNull(),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  lastHeartbeat: timestamp("last_heartbeat", { mode: "date" }),
+});
+
 export const oauthConnections = pgTable("oauth_connections", {
   id: text("id")
     .primaryKey()

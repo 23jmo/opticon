@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { getUserSessionsWithTodos } from "@/lib/db/session-persist";
+import { getLatestThumbnail } from "@/lib/session-store";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,16 @@ export async function GET() {
 
   try {
     const sessions = await getUserSessionsWithTodos(authSession.user.id);
-    return NextResponse.json({ sessions });
+
+    const sessionsWithThumbnails = sessions.map(
+      (s: { id: string; status: string }) => ({
+        ...s,
+        latestThumbnail:
+          s.status === "running" ? getLatestThumbnail(s.id) : undefined,
+      })
+    );
+
+    return NextResponse.json({ sessions: sessionsWithThumbnails });
   } catch (error) {
     console.error("[history] Failed to fetch session history:", error);
     return NextResponse.json(

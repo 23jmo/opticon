@@ -23,14 +23,19 @@ def screenshot_as_base64() -> str:
     return base64.b64encode(img_bytes).decode("utf-8")
 
 
-def click(x: int, y: int) -> str:
-    """Left-click at screen coordinates (x, y)."""
-    _sandbox.left_click(x, y)
+def click(x: int, y: int, button: str = "left", **_kwargs) -> str:
+    """Click at screen coordinates (x, y)."""
+    if button == "right":
+        _sandbox.right_click(x, y)
+    elif button == "middle":
+        _sandbox.middle_click(x, y)
+    else:
+        _sandbox.left_click(x, y)
     time.sleep(0.1)
-    return f"Clicked at ({x}, {y})"
+    return f"Clicked ({button}) at ({x}, {y})"
 
 
-def double_click(x: int, y: int) -> str:
+def double_click(x: int, y: int, **_kwargs) -> str:
     """Double-click at screen coordinates (x, y)."""
     _sandbox.double_click(x, y)
     return f"Double-clicked at ({x}, {y})"
@@ -49,11 +54,34 @@ def type_text(text: str) -> str:
     return f"Typed: {text}"
 
 
-def press_key(key: str) -> str:
+_KEY_ALIASES = {
+    "return": "enter",
+    "esc": "escape",
+    "del": "delete",
+    "bs": "backspace",
+    "arrowup": "up",
+    "arrowdown": "down",
+    "arrowleft": "left",
+    "arrowright": "right",
+}
+
+
+def _normalize_key(key: str) -> str | list[str]:
+    """Normalize key names and split combos like 'ctrl+c' into lists."""
+    key = key.strip()
+    # Handle combos: "ctrl+c", "alt+F2", "shift+enter"
+    if "+" in key:
+        parts = [_KEY_ALIASES.get(k.lower(), k.lower()) for k in key.split("+")]
+        return parts
+    return _KEY_ALIASES.get(key.lower(), key.lower())
+
+
+def press_key(key: str, **_kwargs) -> str:
     """Press a key or key combo (e.g. 'enter', 'ctrl+c')."""
     time.sleep(0.1)
-    _sandbox.press(key)
-    return f"Pressed: {key}"
+    normalized = _normalize_key(key)
+    _sandbox.press(normalized)
+    return f"Pressed: {normalized}"
 
 
 def move_mouse(x: int, y: int) -> str:
@@ -88,12 +116,17 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "click",
-            "description": "Left-click at screen coordinates (x, y).",
+            "description": "Click at screen coordinates (x, y). Defaults to left-click.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "x": {"type": "integer", "description": "X coordinate"},
                     "y": {"type": "integer", "description": "Y coordinate"},
+                    "button": {
+                        "type": "string",
+                        "enum": ["left", "right", "middle"],
+                        "description": "Mouse button (default: left)",
+                    },
                 },
                 "required": ["x", "y"],
             },
@@ -199,10 +232,16 @@ TOOL_SCHEMAS = [
 
 
 def execute_tool(name, arguments):
-    """Execute a tool by name with the given arguments dict. Returns result string."""
+    """Execute a tool by name with the given arguments dict. Returns result string.
+
+    Errors are returned as strings so the model can self-correct rather than crashing.
+    """
     if name == "done":
         return arguments.get("summary", "Task complete")
     func = TOOL_FUNCTIONS.get(name)
     if not func:
-        return f"Unknown tool: {name}"
-    return func(**arguments)
+        return f"ERROR: Unknown tool '{name}'. Available tools: {', '.join(TOOL_FUNCTIONS.keys())}, done"
+    try:
+        return func(**arguments)
+    except Exception as e:
+        return f"ERROR: {name}({arguments}) failed — {e}. Please fix your arguments and try again."

@@ -73,6 +73,54 @@ export function spawnWorkers(sessionId: string, agentCount: number): void {
   }
 }
 
+export function respawnWorker(sessionId: string, agent: Agent): void {
+  const session = getSession(sessionId);
+  if (!session) throw new Error(`Session ${sessionId} not found`);
+
+  let sessionWorkers = workerProcesses.get(sessionId);
+  if (!sessionWorkers) {
+    sessionWorkers = new Map<string, ChildProcess>();
+    workerProcesses.set(sessionId, sessionWorkers);
+  }
+
+  // Don't respawn if already running
+  if (sessionWorkers.has(agent.id)) return;
+
+  const pythonPath = process.env.PYTHON_PATH || "python3";
+  const workerProcess = spawn(pythonPath, ["workers/worker.py"], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      SESSION_ID: sessionId,
+      AGENT_ID: agent.id,
+      USER_ID: session.userId || "",
+      SOCKET_URL: `http://localhost:${process.env.PORT || "3000"}`,
+      E2B_API_KEY: process.env.E2B_API_KEY || "",
+      DEDALUS_API_KEY: process.env.DEDALUS_API_KEY || "",
+      SANDBOX_ID: agent.sandboxId || "",
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+
+  sessionWorkers.set(agent.id, workerProcess);
+  console.log(
+    `[worker-manager] Respawned worker for agent ${agent.id} (pid: ${workerProcess.pid}, sandbox: ${agent.sandboxId})`
+  );
+
+  workerProcess.stdout?.on("data", (data: Buffer) => {
+    console.log(`[worker:${agent.id}] ${data.toString().trim()}`);
+  });
+
+  workerProcess.stderr?.on("data", (data: Buffer) => {
+    console.error(`[worker:${agent.id}:stderr] ${data.toString().trim()}`);
+  });
+
+  workerProcess.on("exit", (code) => {
+    console.log(`[worker-manager] Agent ${agent.id} exited with code ${code}`);
+    sessionWorkers?.delete(agent.id);
+  });
+}
+
 export function killAllWorkers(sessionId: string): void {
   const sessionWorkers = workerProcesses.get(sessionId);
   if (!sessionWorkers) return;

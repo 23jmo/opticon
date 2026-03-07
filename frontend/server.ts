@@ -14,7 +14,11 @@ import {
   updateAgentStreamUrl,
   updateWhiteboard,
   getWhiteboard,
+  updateAgentThumbnail,
+  updateAgentSandboxId,
+  restoreSessionFromDb,
 } from "./lib/session-store";
+import { respawnWorker } from "./lib/worker-manager";
 import type {
   ServerToClientEvents,
   ClientToServerEvents,
@@ -28,11 +32,19 @@ import type {
   WhiteboardUpdatedEvent,
   SessionFollowUpEvent,
   ReplayCompleteEvent,
+  AgentThumbnailEvent,
+  AgentSandboxReadyEvent,
+  AgentHeartbeatEvent,
+  AgentPausedEvent,
+  AgentSandboxExpiredEvent,
 } from "./lib/types";
 import {
   persistTodoStatus,
   persistTodos,
   persistSessionStatus,
+  persistAgentSandboxId,
+  persistAgentHeartbeat,
+  getSessionWithDetails,
 } from "./lib/db/session-persist";
 import { persistReplay } from "./lib/db/replay-persist";
 import { decomposeTasks } from "./lib/orchestrator";
@@ -108,7 +120,7 @@ app.prepare().then(() => {
 
     const timer = setTimeout(() => {
       idleTimers.delete(sessionId);
-      finalizeSession(sessionId);
+      pauseSession(sessionId);
     }, IDLE_TIMEOUT_MS);
 
     idleTimers.set(sessionId, timer);
@@ -126,6 +138,32 @@ app.prepare().then(() => {
   }
 
   /**
+   * Pause a session: set status to "paused", tell workers to stop (they'll pause sandboxes).
+   * The session remains resumable — visiting the URL will respawn workers.
+   */
+  function pauseSession(sessionId: string): void {
+    const session = getSession(sessionId);
+    if (!session || session.status === "completed" || session.status === "failed" || session.status === "paused") return;
+
+    const room = `session:${sessionId}`;
+    session.status = "paused";
+
+    // Tell workers to stop — they'll pause sandboxes in their finally block
+    io.to(room).emit("task:none");
+
+    // Notify dashboard
+    io.to("dashboard").emit("dashboard:session_updated", {
+      sessionId,
+      status: "paused" as const,
+      completedTasks: session.todos.filter((t) => t.status === "completed").length,
+      totalTasks: session.todos.length,
+    });
+
+    console.log(`[server] Session ${sessionId} — paused (idle timeout)`);
+    persistSessionStatus(sessionId, "paused").catch(console.error);
+  }
+
+  /**
    * Finalize a session: set status to completed, emit session:complete,
    * tell workers to stop, and persist.
    */
@@ -138,6 +176,14 @@ app.prepare().then(() => {
 
     io.to(room).emit("session:complete", { sessionId });
     io.to(room).emit("task:none");
+
+    // Notify dashboard
+    io.to("dashboard").emit("dashboard:session_updated", {
+      sessionId,
+      status: "completed" as const,
+      completedTasks: session.todos.filter((t) => t.status === "completed").length,
+      totalTasks: session.todos.length,
+    });
 
     console.log(`[server] Session ${sessionId} — finalized (idle timeout or manual)`);
 
@@ -203,6 +249,14 @@ app.prepare().then(() => {
     session.status = "completed";
     io.to(`session:${sessionId}`).emit("session:complete", { sessionId });
 
+    // Notify dashboard
+    io.to("dashboard").emit("dashboard:session_updated", {
+      sessionId,
+      status: "completed" as const,
+      completedTasks: session.todos.filter((t) => t.status === "completed").length,
+      totalTasks: session.todos.length,
+    });
+
     persistSessionStatus(sessionId, "completed", new Date()).catch(
       console.error
     );
@@ -246,10 +300,49 @@ app.prepare().then(() => {
   io.on("connection", (socket) => {
     console.log(`[socket.io] Client connected: ${socket.id}`);
 
+    // --- Dashboard room events ---
+    socket.on("dashboard:join", () => {
+      socket.join("dashboard");
+      console.log(`[socket.io] ${socket.id} joined dashboard room`);
+    });
+
+    socket.on("dashboard:leave", () => {
+      socket.leave("dashboard");
+      console.log(`[socket.io] ${socket.id} left dashboard room`);
+    });
+
     // --- Browser client events ---
-    socket.on("session:join", (sessionId) => {
+    socket.on("session:join", async (sessionId) => {
       socket.join(`session:${sessionId}`);
       console.log(`[socket.io] ${socket.id} joined session:${sessionId}`);
+
+      // If session not in memory, try to recover from DB
+      const existing = getSession(sessionId);
+      if (!existing) {
+        try {
+          const dbSession = await getSessionWithDetails(sessionId);
+          if (dbSession) {
+            const restored = restoreSessionFromDb(dbSession);
+            console.log(`[server] Session ${sessionId} — restored from DB (status: ${restored.status})`);
+
+            // If session was running or paused, respawn workers with sandbox IDs
+            if (restored.status === "running" || restored.status === "paused") {
+              for (const agent of restored.agents) {
+                if (agent.sandboxId && (agent.status === "paused" || agent.status === "active" || agent.status === "idle")) {
+                  respawnWorker(sessionId, agent);
+                  console.log(`[server] Respawning worker for agent ${agent.id} (sandbox: ${agent.sandboxId})`);
+                }
+              }
+              if (restored.status === "paused") {
+                restored.status = "running";
+                persistSessionStatus(sessionId, "running").catch(console.error);
+              }
+            }
+          }
+        } catch (err) {
+          console.error(`[server] Failed to recover session ${sessionId} from DB:`, err);
+        }
+      }
     });
 
     socket.on("session:leave", (sessionId) => {
@@ -270,7 +363,8 @@ app.prepare().then(() => {
       // Track that this session is stopping — workers need time to save replays
       stoppingSessions.add(sessionId);
 
-      // Tell all workers to stop (they'll save replays in their finally block)
+      // Tell all workers to force-kill sandboxes (not pause)
+      io.to(`session:${sessionId}`).emit("session:stop", { sessionId });
       io.to(`session:${sessionId}`).emit("task:none");
 
       // Safety timeout: if workers don't finish in time, force-complete
@@ -428,6 +522,63 @@ app.prepare().then(() => {
       });
     });
 
+    socket.on("agent:thumbnail", (data: AgentThumbnailEvent) => {
+      const sessionId = findSessionId(socket);
+      if (!sessionId) return;
+
+      updateAgentThumbnail(sessionId, data.agentId, data.thumbnail);
+      io.to("dashboard").emit("thumbnail:update", {
+        sessionId,
+        agentId: data.agentId,
+        thumbnail: data.thumbnail,
+        timestamp: new Date().toISOString(),
+      });
+    });
+
+    socket.on("agent:sandbox_ready", (data: AgentSandboxReadyEvent) => {
+      const sessionId = findSessionId(socket);
+      if (!sessionId) return;
+
+      const { agentId, sandboxId } = data;
+      updateAgentSandboxId(sessionId, agentId, sandboxId);
+      persistAgentSandboxId(agentId, sandboxId).catch(console.error);
+      console.log(`[socket.io] Agent ${agentId} sandbox ready: ${sandboxId}`);
+    });
+
+    socket.on("agent:heartbeat", (data: AgentHeartbeatEvent) => {
+      const { agentId } = data;
+      persistAgentHeartbeat(agentId).catch(console.error);
+    });
+
+    socket.on("agent:paused", (data: AgentPausedEvent) => {
+      const sessionId = findSessionId(socket);
+      if (!sessionId) return;
+
+      const { agentId, sandboxId } = data;
+      updateAgentStatus(sessionId, agentId, "paused");
+      updateAgentSandboxId(sessionId, agentId, sandboxId);
+      persistAgentSandboxId(agentId, sandboxId).catch(console.error);
+      io.to(`session:${sessionId}`).emit("agent:paused", { agentId, sandboxId });
+
+      // If all agents are paused, pause the session
+      const session = getSession(sessionId);
+      if (session && session.agents.every((a) => a.status === "paused" || a.status === "terminated" || a.status === "expired")) {
+        session.status = "paused";
+        persistSessionStatus(sessionId, "paused").catch(console.error);
+        console.log(`[server] Session ${sessionId} — all agents paused, session paused`);
+      }
+    });
+
+    socket.on("agent:sandbox_expired", (data: AgentSandboxExpiredEvent) => {
+      const sessionId = findSessionId(socket);
+      if (!sessionId) return;
+
+      const { agentId } = data;
+      updateAgentStatus(sessionId, agentId, "expired");
+      io.to(`session:${sessionId}`).emit("agent:sandbox_expired", { agentId });
+      console.log(`[server] Agent ${agentId} sandbox expired`);
+    });
+
     socket.on("agent:error", (data: AgentErrorEvent) => {
       const sessionId = findSessionId(socket);
       if (!sessionId) return;
@@ -459,6 +610,22 @@ app.prepare().then(() => {
         agentId,
         result,
       });
+
+      // Notify dashboard of progress
+      {
+        const session = getSession(sessionId);
+        if (session) {
+          const completedTasks = session.todos.filter(
+            (t) => t.status === "completed"
+          ).length;
+          io.to("dashboard").emit("dashboard:session_updated", {
+            sessionId,
+            status: session.status,
+            completedTasks,
+            totalTasks: session.todos.length,
+          });
+        }
+      }
 
       // Try to assign next task
       const nextTask = getNextPendingTask(sessionId);

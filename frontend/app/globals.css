@@ -173,3 +173,25 @@
 .animate-slide-in {
   animation: slide-in 0.2s ease-out;
 }
+
+/* Safe area inset for mobile bottom bars */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Touch action for bottom sheets */
+.touch-none {
+  touch-action: none;
+}
+
+/* Skeleton loading pulse for thumbnails */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-skeleton {
+  animation: skeleton-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}

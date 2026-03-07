@@ -24,6 +24,7 @@ interface AgentBrowserProps {
   whiteboard?: string;
   onAgentCommand?: (agentId: string, message: string) => void;
   replays?: Record<string, { manifestUrl: string; frameCount: number }>;
+  compact?: boolean;
 }
 
 export function AgentBrowser({
@@ -35,6 +36,7 @@ export function AgentBrowser({
   whiteboard,
   onAgentCommand,
   replays,
+  compact = false,
 }: AgentBrowserProps) {
   const isMock = sessionId === "demo";
   const isWhiteboardTab = activeAgentId === "__whiteboard__";
@@ -53,7 +55,7 @@ export function AgentBrowser({
   return (
     <div className="flex h-full flex-col rounded-xl border border-border bg-muted/30 overflow-hidden shadow-xl shadow-black/20">
       {/* Tab bar */}
-      <div className="flex items-stretch border-b border-border">
+      <div className="flex items-stretch border-b border-border overflow-x-auto">
         {agents.map((agent, i) => {
           const isActive = agent.id === activeAgentId && !isWhiteboardTab;
           const agentHasReplay = !!replays?.[agent.id];
@@ -63,7 +65,7 @@ export function AgentBrowser({
               key={agent.id}
               onClick={() => onTabChange(agent.id)}
               className={cn(
-                "group flex items-center gap-3 px-4 py-2.5 text-[13px] transition-colors min-w-0",
+                "group flex items-center gap-2 lg:gap-3 px-3 lg:px-4 py-2 lg:py-2.5 text-[13px] transition-colors min-w-0 shrink-0",
                 isActive
                   ? "bg-background text-foreground"
                   : "bg-muted/40 text-muted-foreground hover:text-foreground"
@@ -75,18 +77,22 @@ export function AgentBrowser({
               )}>
                 {i + 1}
               </span>
-              <span className="truncate font-medium">{agent.name}</span>
-              <span
-                className={cn(
-                  "flex items-center gap-1 shrink-0 ml-1",
-                  isActive
-                    ? "text-muted-foreground"
-                    : "opacity-0 group-hover:opacity-100 text-muted-foreground"
-                )}
-              >
-                <Ellipsis className="size-4" />
-                <X className="size-4" />
-              </span>
+              {!compact && (
+                <span className="truncate font-medium">{agent.name}</span>
+              )}
+              {!compact && (
+                <span
+                  className={cn(
+                    "flex items-center gap-1 shrink-0 ml-1",
+                    isActive
+                      ? "text-muted-foreground"
+                      : "opacity-0 group-hover:opacity-100 text-muted-foreground"
+                  )}
+                >
+                  <Ellipsis className="size-4" />
+                  <X className="size-4" />
+                </span>
+              )}
             </button>
           );
         })}
@@ -95,7 +101,7 @@ export function AgentBrowser({
           <button
             onClick={() => onTabChange("__whiteboard__")}
             className={cn(
-              "flex items-center gap-2 px-4 py-2.5 text-[13px] font-medium transition-colors min-w-0",
+              "flex items-center gap-2 px-3 lg:px-4 py-2 lg:py-2.5 text-[13px] font-medium transition-colors min-w-0 shrink-0",
               isWhiteboardTab
                 ? "bg-background text-foreground"
                 : "bg-muted/40 text-muted-foreground hover:text-foreground"
@@ -104,7 +110,7 @@ export function AgentBrowser({
             <span className="flex items-center justify-center size-5 rounded-full border border-primary/30 bg-primary/10 text-[11px] text-primary shrink-0">
               W
             </span>
-            <span className="truncate">Whiteboard</span>
+            {!compact && <span className="truncate">Whiteboard</span>}
           </button>
         )}
       </div>

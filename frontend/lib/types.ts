@@ -2,6 +2,7 @@ export type SessionStatus =
   | "decomposing"
   | "pending_approval"
   | "running"
+  | "paused"
   | "completed"
   | "failed";
 
@@ -11,6 +12,8 @@ export type AgentStatus =
   | "idle"
   | "error"
   | "stopping"
+  | "paused"
+  | "expired"
   | "terminated";
 
 export interface Todo {
@@ -101,10 +104,23 @@ export interface AgentTerminatedEvent {
   agentId: string;
 }
 
-export interface AgentThumbnailEvent {
+export interface AgentSandboxReadyEvent {
   agentId: string;
-  thumbnail: string;
-  timestamp: number;
+  sandboxId: string;
+}
+
+export interface AgentHeartbeatEvent {
+  agentId: string;
+  timestamp: string;
+}
+
+export interface AgentPausedEvent {
+  agentId: string;
+  sandboxId: string;
+}
+
+export interface AgentSandboxExpiredEvent {
+  agentId: string;
 }
 
 export interface SessionCompleteEvent {
@@ -135,17 +151,21 @@ export interface ServerToClientEvents {
   "agent:stream_ready": (payload: AgentStreamReadyEvent) => void;
   "agent:error": (payload: AgentErrorEvent) => void;
   "agent:terminated": (payload: AgentTerminatedEvent) => void;
-  "agent:thumbnail": (payload: AgentThumbnailEvent) => void;
+  "agent:paused": (payload: AgentPausedEvent) => void;
+  "agent:sandbox_expired": (payload: AgentSandboxExpiredEvent) => void;
   "session:complete": (payload: SessionCompleteEvent) => void;
   "session:tasks_done": (payload: SessionTasksDoneEvent) => void;
   "whiteboard:updated": (payload: WhiteboardUpdatedEvent) => void;
   "replay:ready": (payload: ReplayReadyEvent) => void;
+  "thumbnail:update": (payload: ThumbnailUpdateEvent) => void;
+  "dashboard:session_updated": (payload: DashboardSessionEvent) => void;
   "task:assign": (payload: {
     taskId: string;
     description: string;
     whiteboard?: string;
   }) => void;
   "task:none": () => void;
+  "session:stop": (payload: { sessionId: string }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -161,8 +181,15 @@ export interface ClientToServerEvents {
   "agent:error": (payload: AgentErrorEvent) => void;
   "task:completed": (payload: TaskCompletedEvent) => void;
   "agent:terminated": (payload: AgentTerminatedEvent) => void;
+  "agent:sandbox_ready": (payload: AgentSandboxReadyEvent) => void;
+  "agent:heartbeat": (payload: AgentHeartbeatEvent) => void;
+  "agent:paused": (payload: AgentPausedEvent) => void;
+  "agent:sandbox_expired": (payload: AgentSandboxExpiredEvent) => void;
   "whiteboard:updated": (payload: WhiteboardUpdatedEvent) => void;
   "replay:complete": (payload: ReplayCompleteEvent) => void;
+  "agent:thumbnail": (payload: AgentThumbnailEvent) => void;
+  "dashboard:join": () => void;
+  "dashboard:leave": () => void;
 }
 
 // Alias for frontend components that use "Task" instead of "Todo"
@@ -212,4 +239,25 @@ export interface ReplayReadyEvent {
   agentId: string;
   manifestUrl: string;
   frameCount: number;
+}
+
+// --- Dashboard + Thumbnail types ---
+
+export interface AgentThumbnailEvent {
+  agentId: string;
+  thumbnail: string;
+}
+
+export interface ThumbnailUpdateEvent {
+  sessionId: string;
+  agentId: string;
+  thumbnail: string;
+  timestamp: string;
+}
+
+export interface DashboardSessionEvent {
+  sessionId: string;
+  status: SessionStatus;
+  completedTasks: number;
+  totalTasks: number;
 }

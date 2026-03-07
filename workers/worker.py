@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sys
+import time
 from io import BytesIO
 
 import socketio
@@ -23,8 +24,16 @@ SYSTEM_PROMPT = (
     "You will be shown a screenshot of the current screen before each turn. "
     "Look at the screenshot carefully, then use one of the available tools "
     "(click, double_click, type_text, press_key, move_mouse, scroll) to interact with the desktop. "
-    "You can only use ONE tool per turn. After your action, you'll receive a new screenshot. "
-    "When the task is complete, call the 'done' tool with a summary."
+    "You can only use ONE tool per turn. After your action, you'll receive a new screenshot.\n\n"
+    "IMPORTANT RULES:\n"
+    "- If you see a blank desktop, start by opening a web browser (double-click the browser icon, "
+    "or right-click the desktop and open a terminal, then run 'firefox' or 'chromium').\n"
+    "- You MUST take real actions to accomplish the task. Do NOT call 'done' until you have "
+    "actually performed meaningful actions and can see evidence of completion on screen.\n"
+    "- Break complex tasks into steps: open the right application, navigate to the right place, "
+    "perform the action, and verify the result.\n"
+    "- When the task is genuinely complete and you can confirm it from the screenshot, "
+    "call the 'done' tool with a detailed summary of what you accomplished."
 )
 
 MODEL = "anthropic/claude-sonnet-4-5-20250929"
@@ -32,6 +41,8 @@ MAX_STEPS = 500
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 2  # seconds
 HISTORY_KEEP_RECENT = 10  # number of recent screenshot/action exchanges to keep verbatim
+THUMBNAIL_INTERVAL_SECONDS = 10
+MIN_STEPS_BEFORE_DONE = 3  # agent must take at least this many actions before calling done
 
 
 def make_screenshot_message():
@@ -126,7 +137,7 @@ def trim_message_history(messages):
     ] + recent_part
 
 
-async def run_agent_loop(client, task_description, whiteboard_content="", user_memories="", on_step=None, replay_buffer=None, terminated=None):
+async def run_agent_loop(client, task_description, whiteboard_content="", user_memories="", on_step=None, replay_buffer=None, terminated=None, on_screenshot=None):
     """
     Observe-think-act loop using Dedalus chat.completions.create().
 
@@ -152,6 +163,7 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
     ]
 
     last_action_label = "Starting task"
+    no_tool_retries = 0
 
     for step in range(MAX_STEPS):
         # Check for termination between steps
@@ -170,12 +182,23 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
         if replay_buffer is not None:
             replay_buffer.capture_frame(raw_png, last_action_label)
 
+        # Emit thumbnail if callback provided
+        if on_screenshot is not None:
+            await on_screenshot(raw_png)
+
+        # Exclude the 'done' tool for the first few steps to prevent premature completion
+        if step < MIN_STEPS_BEFORE_DONE:
+            tools = [t for t in e2b_tools.TOOL_SCHEMAS if t["function"]["name"] != "done"]
+        else:
+            tools = e2b_tools.TOOL_SCHEMAS
+
         response = await call_with_retry(
             client,
             model=MODEL,
             messages=messages,
-            tools=e2b_tools.TOOL_SCHEMAS,
+            tools=tools,
             tool_choice={"type": "any"},
+            max_tokens=2048,
         )
 
         choice = response.choices[0]
@@ -210,7 +233,20 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
                 reasoning = combined or None
 
         if not msg.tool_calls:
-            return msg.content or "(no response)"
+            no_tool_retries += 1
+            if no_tool_retries >= 3:
+                logger.error("Model returned no tool calls %d times, giving up", no_tool_retries)
+                return msg.content or "(model failed to call tools)"
+            # Model returned no tool calls despite tool_choice — retry
+            # This can happen if the streaming response is incomplete
+            logger.warning("No tool calls in response at step %d (retry %d/3)", step, no_tool_retries)
+            # Remove the assistant response and screenshot message (will re-add on next iteration)
+            messages.pop()  # assistant response
+            messages.pop()  # screenshot message
+            continue
+
+        # Got a valid tool call — reset retry counter
+        no_tool_retries = 0
 
         # Execute the first tool call (one action per turn)
         tc = msg.tool_calls[0]
@@ -262,6 +298,7 @@ async def main():
     # --- Register event handlers BEFORE booting sandbox ---
     task_queue = asyncio.Queue()
     terminated = asyncio.Event()
+    force_kill = False
 
     @sio.on("task:assign")
     async def on_task_assign(data):
@@ -271,25 +308,40 @@ async def main():
     async def on_task_none(data=None):
         terminated.set()
 
+    @sio.on("session:stop")
+    async def on_session_stop(data=None):
+        nonlocal force_kill
+        force_kill = True
+        terminated.set()
+
     @sio.on("session:complete")
     async def on_session_complete(data=None):
         terminated.set()
 
-    # --- Boot E2B sandbox ---
+    # --- Boot or reconnect E2B sandbox ---
     desktop = None
+    reconnect_sandbox_id = os.environ.get("SANDBOX_ID")
     try:
-        # Check if this is a Panopticon session for extended timeout
-        is_panopticon = os.environ.get("PANOPTICON_MODE", "false").lower() == "true"
-        sandbox_timeout = 7200 if is_panopticon else 1200  # 2 hours for Panopticon, 20 min for regular
-
-        desktop = Sandbox.create(timeout=sandbox_timeout)
-        desktop.stream.start()
-        stream_url = desktop.stream.get_url()
-        await emit("agent:stream_ready", {"streamUrl": stream_url})
-        logger.info("Sandbox booted, stream at %s", stream_url)
+        if reconnect_sandbox_id:
+            logger.info("Reconnecting to sandbox %s", reconnect_sandbox_id)
+            desktop = Sandbox(sandbox_id=reconnect_sandbox_id, timeout=3600)
+            desktop.stream.start()
+            stream_url = desktop.stream.get_url()
+            await emit("agent:stream_ready", {"streamUrl": stream_url})
+            logger.info("Reconnected to sandbox %s, stream at %s", reconnect_sandbox_id, stream_url)
+        else:
+            desktop = Sandbox.create(timeout=3600)
+            desktop.stream.start()
+            stream_url = desktop.stream.get_url()
+            await emit("agent:sandbox_ready", {"sandboxId": desktop.sandbox_id})
+            await emit("agent:stream_ready", {"streamUrl": stream_url})
+            logger.info("Sandbox booted (id=%s), stream at %s", desktop.sandbox_id, stream_url)
     except Exception as e:
-        logger.error("Failed to boot sandbox: %s", e)
-        await emit("agent:error", {"error": str(e)})
+        logger.error("Failed to boot/reconnect sandbox: %s", e)
+        if reconnect_sandbox_id:
+            await emit("agent:sandbox_expired", {})
+        else:
+            await emit("agent:error", {"error": str(e)})
         await sio.disconnect()
         return
 
@@ -302,9 +354,21 @@ async def main():
     # --- Replay buffer ---
     replay_buffer = ReplayBuffer()
     r2_public_url = os.environ.get("R2_PUBLIC_URL", "")
+    _last_thumbnail_time = 0.0
 
-    # --- Memory manager (per-user, optional) ---
-    memory_mgr = MemoryManager() if user_id else None
+    # --- Memory manager (per-user, opt-in via ENABLE_MEMORY env var) ---
+    memory_mgr = MemoryManager() if user_id and os.environ.get("ENABLE_MEMORY") else None
+
+    # --- Heartbeat background task ---
+    async def heartbeat_loop():
+        while not terminated.is_set():
+            try:
+                await emit("agent:heartbeat", {"timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+            except Exception:
+                pass
+            await asyncio.sleep(30)
+
+    heartbeat_task = asyncio.create_task(heartbeat_loop())
 
     # --- Thumbnail generation for Panopticon ---
     thumbnail_task = None
@@ -385,6 +449,17 @@ async def main():
                         "actionId": action_id,
                     })
 
+            async def on_screenshot(raw_png):
+                nonlocal _last_thumbnail_time
+                now = time.monotonic()
+                if now - _last_thumbnail_time >= THUMBNAIL_INTERVAL_SECONDS:
+                    _last_thumbnail_time = now
+                    try:
+                        thumb = ReplayBuffer.make_thumbnail(raw_png)
+                        await emit("agent:thumbnail", {"thumbnail": thumb})
+                    except Exception as e:
+                        logger.warning("Failed to emit thumbnail: %s", e)
+
             try:
                 result = await run_agent_loop(
                     client, task_description,
@@ -393,7 +468,14 @@ async def main():
                     on_step=on_step,
                     replay_buffer=replay_buffer,
                     terminated=terminated,
+                    on_screenshot=on_screenshot,
                 )
+            except (ConnectionError, TimeoutError, OSError) as e:
+                # E2B sandbox expired or connection lost
+                logger.error("Sandbox connection lost during task %s: %s", task_id, e)
+                await emit("agent:sandbox_expired", {})
+                terminated.set()
+                result = f"(sandbox expired: {e})"
             except Exception as e:
                 result = f"Error: {e}"
                 await emit(
@@ -421,13 +503,12 @@ async def main():
             )
 
     finally:
-        # Cancel thumbnail generation
-        if thumbnail_task:
-            thumbnail_task.cancel()
-            try:
-                await thumbnail_task
-            except asyncio.CancelledError:
-                pass
+        # Cancel heartbeat
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except asyncio.CancelledError:
+            pass
 
         # Save/upload replay frames before killing sandbox
         if replay_buffer.frame_count > 0:
@@ -458,8 +539,22 @@ async def main():
             except Exception as e:
                 logger.error("Failed to save replay: %s", e)
 
+        # Decide whether to pause or kill the sandbox
         if desktop:
-            desktop.kill()
+            if force_kill:
+                desktop.kill()
+                logger.info("Sandbox killed (user-initiated stop)")
+            else:
+                try:
+                    desktop.pause()
+                    await emit("agent:paused", {"sandboxId": desktop.sandbox_id})
+                    logger.info("Sandbox paused (id=%s)", desktop.sandbox_id)
+                except Exception as e:
+                    logger.warning("Failed to pause sandbox, killing instead: %s", e)
+                    try:
+                        desktop.kill()
+                    except Exception:
+                        pass
         await emit("agent:terminated", {})
         await sio.disconnect()
         logger.info("Worker shut down")

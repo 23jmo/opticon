@@ -1,7 +1,7 @@
 import { db } from "./index";
-import { sessions, todos } from "./schema";
+import { sessions, todos, agents } from "./schema";
 import { eq, desc } from "drizzle-orm";
-import type { Todo } from "../types";
+import type { Todo, Agent } from "../types";
 
 /**
  * Persist a new session to the database
@@ -97,6 +97,85 @@ export async function persistTodoStatus(
       ...(result && { result }),
     })
     .where(eq(todos.id, todoId));
+}
+
+// --- Agent persistence helpers ---
+
+export async function persistAgent(agent: Agent) {
+  await db.insert(agents).values({
+    id: agent.id,
+    sessionId: agent.sessionId,
+    name: agent.name,
+    status: agent.status,
+    sandboxId: agent.sandboxId || null,
+    streamUrl: agent.streamUrl || null,
+    currentTaskId: agent.currentTaskId,
+    tasksCompleted: agent.tasksCompleted || 0,
+    tasksTotal: agent.tasksTotal || 0,
+    createdAt: new Date(),
+  });
+}
+
+export async function persistAgentStatus(agentId: string, status: string) {
+  await db
+    .update(agents)
+    .set({ status })
+    .where(eq(agents.id, agentId));
+}
+
+export async function persistAgentSandboxId(
+  agentId: string,
+  sandboxId: string
+) {
+  await db
+    .update(agents)
+    .set({ sandboxId })
+    .where(eq(agents.id, agentId));
+}
+
+export async function persistAgentStreamUrl(
+  agentId: string,
+  streamUrl: string
+) {
+  await db
+    .update(agents)
+    .set({ streamUrl })
+    .where(eq(agents.id, agentId));
+}
+
+export async function persistAgentHeartbeat(agentId: string) {
+  await db
+    .update(agents)
+    .set({ lastHeartbeat: new Date() })
+    .where(eq(agents.id, agentId));
+}
+
+export async function getSessionAgents(sessionId: string) {
+  return db
+    .select()
+    .from(agents)
+    .where(eq(agents.sessionId, sessionId));
+}
+
+export async function getSessionWithDetails(sessionId: string) {
+  const [session] = await db
+    .select()
+    .from(sessions)
+    .where(eq(sessions.id, sessionId));
+
+  if (!session) return null;
+
+  const sessionTodos = await db
+    .select()
+    .from(todos)
+    .where(eq(todos.sessionId, sessionId));
+
+  const sessionAgents = await db
+    .select()
+    .from(agents)
+    .where(eq(agents.sessionId, sessionId));
+
+  return { ...session, todos: sessionTodos, agents: sessionAgents };
 }
 
 /**

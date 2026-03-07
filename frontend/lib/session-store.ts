@@ -1,10 +1,17 @@
 import { v4 as uuidv4 } from "uuid";
 import type { Session, Todo, Agent } from "./types";
+import {
+  persistAgent,
+  persistAgentStatus,
+  persistAgentStreamUrl,
+} from "./db/session-persist";
 
 const globalStore = globalThis as unknown as {
   __opticon_sessions?: Map<string, Session>;
+  __opticon_thumbnails?: Map<string, string>;
 };
 const sessions = (globalStore.__opticon_sessions ??= new Map<string, Session>());
+const thumbnails = (globalStore.__opticon_thumbnails ??= new Map<string, string>());
 
 export function createSession(
   id: string,
@@ -129,6 +136,7 @@ export function addAgent(sessionId: string, agent: Agent): void {
   const session = sessions.get(sessionId);
   if (!session) throw new Error(`Session ${sessionId} not found`);
   session.agents.push(agent);
+  persistAgent(agent).catch(console.error);
 }
 
 export function updateAgentStatus(
@@ -141,6 +149,7 @@ export function updateAgentStatus(
 
   const agent = session.agents.find((a) => a.id === agentId);
   if (agent) agent.status = status;
+  persistAgentStatus(agentId, status).catch(console.error);
 }
 
 export function getWhiteboard(sessionId: string): string {
@@ -164,6 +173,93 @@ export function updateAgentStreamUrl(
   if (!session) return;
   const agent = session.agents.find((a) => a.id === agentId);
   if (agent) agent.streamUrl = streamUrl;
+  persistAgentStreamUrl(agentId, streamUrl).catch(console.error);
+}
+
+export function updateAgentSandboxId(
+  sessionId: string,
+  agentId: string,
+  sandboxId: string
+): void {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  const agent = session.agents.find((a) => a.id === agentId);
+  if (agent) agent.sandboxId = sandboxId;
+}
+
+export function restoreSessionFromDb(dbSession: {
+  id: string;
+  prompt: string;
+  agentCount: number;
+  status: string;
+  userId: string;
+  createdAt: Date | null;
+  completedAt: Date | null;
+  todos: Array<{ id: string; description: string; status: string; assignedTo: string | null; result: string | null }>;
+  agents: Array<{ id: string; name: string; status: string; sandboxId: string | null; streamUrl: string | null; currentTaskId: string | null; tasksCompleted: number; tasksTotal: number; sessionId: string }>;
+}): Session {
+  const session: Session = {
+    id: dbSession.id,
+    prompt: dbSession.prompt,
+    agentCount: dbSession.agentCount,
+    status: dbSession.status as Session["status"],
+    todos: dbSession.todos.map((t) => ({
+      id: t.id,
+      description: t.description,
+      status: t.status as Todo["status"],
+      assignedTo: t.assignedTo,
+      result: t.result || undefined,
+    })),
+    agents: dbSession.agents.map((a) => ({
+      id: a.id,
+      name: a.name,
+      sessionId: a.sessionId,
+      status: a.status as Agent["status"],
+      currentTaskId: a.currentTaskId,
+      sandboxId: a.sandboxId || undefined,
+      streamUrl: a.streamUrl || undefined,
+      tasksCompleted: a.tasksCompleted,
+      tasksTotal: a.tasksTotal,
+    })),
+    createdAt: dbSession.createdAt?.getTime() || Date.now(),
+    whiteboard: "",
+    userId: dbSession.userId,
+  };
+  sessions.set(session.id, session);
+  return session;
+}
+
+export function updateAgentThumbnail(
+  sessionId: string,
+  agentId: string,
+  thumbnail: string
+): void {
+  thumbnails.set(`${sessionId}:${agentId}`, thumbnail);
+}
+
+export function getLatestThumbnail(sessionId: string): string | undefined {
+  let latest: string | undefined;
+  for (const [key, value] of thumbnails) {
+    if (key.startsWith(`${sessionId}:`)) {
+      latest = value;
+    }
+  }
+  return latest;
+}
+
+export function getAllActiveSessions(): Session[] {
+  const active: Session[] = [];
+  for (const session of sessions.values()) {
+    if (
+      session.status === "running" ||
+      session.status === "decomposing" ||
+      session.status === "pending_approval" ||
+      session.status === "paused"
+    ) {
+      active.push(session);
+    }
+  }
+  return active;
 }
 
 // Panopticon-specific functions

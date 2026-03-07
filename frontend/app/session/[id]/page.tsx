@@ -17,6 +17,8 @@ import {
   TaskCompletedEvent,
   WhiteboardUpdatedEvent,
   ReplayReadyEvent,
+  AgentPausedEvent,
+  AgentSandboxExpiredEvent,
 } from "@/lib/types";
 import { createSessionSocket } from "@/lib/socket-client";
 import {
@@ -29,6 +31,8 @@ import { PromptBar } from "@/components/prompt-bar";
 import { AgentBrowser } from "@/components/agent-browser";
 import { AgentGrid } from "@/components/agent-grid";
 import { ThinkingSidebar } from "@/components/thinking-sidebar";
+import { ThinkingBottomSheet } from "@/components/thinking-bottom-sheet";
+import { useIsDesktop, useIsMobile } from "@/hooks/use-media-query";
 import { Loader2 } from "lucide-react";
 
 function SessionContent() {
@@ -63,6 +67,10 @@ function SessionContent() {
   const [viewMode, setViewMode] = useState<"tabs" | "grid">("tabs");
   const [replays, setReplays] = useState<Record<string, { manifestUrl: string; frameCount: number }>>({});
   const [isStopping, setIsStopping] = useState(false);
+  const [isRecovering, setIsRecovering] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const isDesktop = useIsDesktop();
+  const isMobile = useIsMobile();
 
   const handleStop = useCallback(() => {
     if (socketRef.current) {
@@ -158,7 +166,15 @@ function SessionContent() {
 
     const fetchAndConnect = async () => {
       try {
-        const response = await fetch(`/api/sessions/${sessionId}`);
+        let response = await fetch(`/api/sessions/${sessionId}`);
+
+        // If not in memory, try recovery from DB
+        if (response.status === 404) {
+          setIsRecovering(true);
+          response = await fetch(`/api/sessions/${sessionId}/recover`);
+          setIsRecovering(false);
+        }
+
         if (response.ok) {
           const data = await response.json();
           if (data.status === "pending_approval") {
@@ -172,6 +188,13 @@ function SessionContent() {
             setAgents(data.agents);
             if (data.agents.length > 0) {
               setActiveTab(data.agents[0].id);
+            }
+            // Check if all sandboxes are expired
+            const allExpired = data.agents.length > 0 && data.agents.every(
+              (a: Agent) => a.status === "expired" || a.status === "terminated"
+            );
+            if (allExpired && data.status !== "completed") {
+              setSessionExpired(true);
             }
           }
           if (data.todos) {
@@ -187,6 +210,7 @@ function SessionContent() {
           }
         }
       } catch {
+        setIsRecovering(false);
         // Continue with socket connection
       }
 
@@ -356,10 +380,29 @@ function SessionContent() {
         );
       });
 
-      socket.on("agent:thumbnail", (data: { agentId: string; thumbnail: string; timestamp: number }) => {
-        // Handle thumbnail updates for mobile UI
-        // This could be used to update a thumbnail cache if needed
-        console.log("Thumbnail update for", data.agentId);
+      socket.on("agent:paused", (data: AgentPausedEvent) => {
+        setAgents((prev) =>
+          prev.map((agent) =>
+            agent.id === data.agentId
+              ? { ...agent, status: "paused" as const, sandboxId: data.sandboxId }
+              : agent
+          )
+        );
+      });
+
+      socket.on("agent:sandbox_expired", (data: AgentSandboxExpiredEvent) => {
+        setAgents((prev) => {
+          const updated = prev.map((agent) =>
+            agent.id === data.agentId
+              ? { ...agent, status: "expired" as const }
+              : agent
+          );
+          // Check if all sandboxes are now dead
+          if (updated.every((a) => a.status === "expired" || a.status === "terminated")) {
+            setSessionExpired(true);
+          }
+          return updated;
+        });
       });
 
       socket.on("whiteboard:updated", (data: WhiteboardUpdatedEvent) => {
@@ -440,44 +483,71 @@ function SessionContent() {
     );
   }
 
+  const effectiveViewMode = isMobile ? "tabs" : viewMode;
+
   return (
     <div className="flex h-screen flex-col">
+      {/* Recovering banner */}
+      {isRecovering && (
+        <div className="shrink-0 border-b border-cyan-500/20 bg-cyan-500/10 px-3 py-2 lg:px-5 lg:py-3 flex items-center gap-2 lg:gap-3">
+          <Loader2 className="size-3.5 lg:size-4 animate-spin text-cyan-400" />
+          <p className="text-xs lg:text-sm text-cyan-400 font-medium">
+            Reconnecting to session...
+          </p>
+        </div>
+      )}
+
+      {/* Session expired banner */}
+      {sessionExpired && !sessionComplete && (
+        <div className="shrink-0 border-b border-amber-500/20 bg-amber-500/10 px-3 py-2 lg:px-5 lg:py-3 flex items-center justify-between">
+          <p className="text-xs lg:text-sm text-amber-400 font-medium">
+            Session expired — sandboxes timed out
+          </p>
+          <button
+            onClick={() => router.push(`/session/${sessionId}/summary`)}
+            className="text-xs lg:text-sm text-amber-400 hover:text-amber-300 font-medium transition-colors border border-amber-500/30 rounded-md px-2 lg:px-3 py-1 shrink-0"
+          >
+            View Results
+          </button>
+        </div>
+      )}
+
       {/* Stopping banner */}
       {isStopping && !sessionComplete && (
-        <div className="shrink-0 border-b border-amber-500/20 bg-amber-500/10 px-5 py-3 flex items-center gap-3">
-          <Loader2 className="size-4 animate-spin text-amber-400" />
-          <p className="text-sm text-amber-400 font-medium">
-            Stopping session — saving agent replays...
+        <div className="shrink-0 border-b border-amber-500/20 bg-amber-500/10 px-3 py-2 lg:px-5 lg:py-3 flex items-center gap-2 lg:gap-3">
+          <Loader2 className="size-3.5 lg:size-4 animate-spin text-amber-400" />
+          <p className="text-xs lg:text-sm text-amber-400 font-medium">
+            Stopping — saving replays...
           </p>
         </div>
       )}
 
       {/* Completion banner */}
       {sessionComplete && (
-        <div className="shrink-0 border-b border-emerald-500/20 bg-emerald-500/10 px-5 py-3 flex items-center justify-between">
-          <p className="text-sm text-emerald-400 font-medium">
+        <div className="shrink-0 border-b border-emerald-500/20 bg-emerald-500/10 px-3 py-2 lg:px-5 lg:py-3 flex items-center justify-between">
+          <p className="text-xs lg:text-sm text-emerald-400 font-medium">
             Session finished
           </p>
           <button
             onClick={() => router.push(`/session/${sessionId}/summary`)}
-            className="text-sm text-emerald-400 hover:text-emerald-300 font-medium transition-colors"
+            className="text-xs lg:text-sm text-emerald-400 hover:text-emerald-300 font-medium transition-colors"
           >
             View Summary
           </button>
         </div>
       )}
 
-      {/* Tasks done banner (all tasks complete, agents still alive for follow-ups) */}
+      {/* Tasks done banner */}
       {tasksDone && !sessionComplete && (
-        <div className="shrink-0 border-b border-emerald-500/20 bg-emerald-500/10 px-5 py-3 flex items-center justify-between">
-          <p className="text-sm text-emerald-400 font-medium">
-            All tasks completed — agents are standing by for follow-up instructions
+        <div className="shrink-0 border-b border-emerald-500/20 bg-emerald-500/10 px-3 py-2 lg:px-5 lg:py-3 flex items-center justify-between">
+          <p className="text-xs lg:text-sm text-emerald-400 font-medium line-clamp-1">
+            All tasks completed — standing by for follow-ups
           </p>
           <button
             onClick={handleFinish}
-            className="text-sm text-emerald-400 hover:text-emerald-300 font-medium transition-colors border border-emerald-500/30 rounded-md px-3 py-1"
+            className="text-xs lg:text-sm text-emerald-400 hover:text-emerald-300 font-medium transition-colors border border-emerald-500/30 rounded-md px-2 lg:px-3 py-1 shrink-0"
           >
-            Finish Session
+            Finish
           </button>
         </div>
       )}
@@ -485,10 +555,11 @@ function SessionContent() {
       {/* Prompt bar */}
       <PromptBar
         prompt={prompt}
-        viewMode={viewMode}
+        viewMode={effectiveViewMode}
         onViewModeChange={setViewMode}
         onStop={handleStop}
         tasksComplete={tasksDone || sessionComplete || isStopping}
+        isMobile={isMobile}
         onFollowUp={(text) => {
           if (socketRef.current) {
             socketRef.current.emit("session:followup", { sessionId, prompt: text });
@@ -500,8 +571,8 @@ function SessionContent() {
       {/* Main content: browser/grid + thinking sidebar */}
       <div className="flex flex-1 overflow-hidden">
         {/* Agent view */}
-        <div className="flex-1 p-3 min-w-0">
-          {viewMode === "tabs" ? (
+        <div className="flex-1 p-2 lg:p-3 min-w-0">
+          {effectiveViewMode === "tabs" ? (
             <AgentBrowser
               agents={agents}
               activeAgentId={activeTab}
@@ -511,6 +582,7 @@ function SessionContent() {
               whiteboard={whiteboard}
               onAgentCommand={handleAgentCommand}
               replays={replays}
+              compact={isMobile}
             />
           ) : (
             <AgentGrid
@@ -523,15 +595,26 @@ function SessionContent() {
           )}
         </div>
 
-        {/* Thinking sidebar */}
-        <div className="w-[360px] shrink-0">
-          <ThinkingSidebar
-            entries={thinkingEntries}
-            agents={agents}
-            activeAgentId={activeTab}
-          />
-        </div>
+        {/* Thinking sidebar — desktop only */}
+        {isDesktop && (
+          <div className="w-[360px] shrink-0">
+            <ThinkingSidebar
+              entries={thinkingEntries}
+              agents={agents}
+              activeAgentId={activeTab}
+            />
+          </div>
+        )}
       </div>
+
+      {/* Thinking bottom sheet — mobile only */}
+      {!isDesktop && (
+        <ThinkingBottomSheet
+          entries={thinkingEntries}
+          agents={agents}
+          activeAgentId={activeTab}
+        />
+      )}
     </div>
   );
 }

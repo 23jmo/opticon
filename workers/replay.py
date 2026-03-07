@@ -22,6 +22,10 @@ FRAME_WIDTH = 320
 FRAME_HEIGHT = 180
 JPEG_QUALITY = 30
 
+THUMBNAIL_WIDTH = 160
+THUMBNAIL_HEIGHT = 90
+THUMBNAIL_QUALITY = 20
+
 
 class ReplayBuffer:
     """Accumulates downscaled screenshots during the agent loop."""
@@ -32,6 +36,22 @@ class ReplayBuffer:
     @property
     def frame_count(self) -> int:
         return len(self._frames)
+
+    @staticmethod
+    def make_thumbnail(
+        raw_png_bytes: bytes,
+        width: int = THUMBNAIL_WIDTH,
+        height: int = THUMBNAIL_HEIGHT,
+        quality: int = THUMBNAIL_QUALITY,
+    ) -> str:
+        """Resize a raw PNG screenshot to a tiny JPEG and return base64-encoded string."""
+        img = Image.open(io.BytesIO(raw_png_bytes))
+        img = img.resize((width, height), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality)
+        import base64
+
+        return base64.b64encode(buf.getvalue()).decode("utf-8")
 
     def capture_frame(self, raw_png_bytes: bytes, action_label: str) -> None:
         """Downscale a full-res PNG screenshot to a tiny JPEG and buffer it."""
