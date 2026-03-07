@@ -1,4 +1,6 @@
 dedalus-labs
 e2b-desktop
 Pillow
+imageio
+numpy
 python-socketio[asyncio_client]>=5.0.0

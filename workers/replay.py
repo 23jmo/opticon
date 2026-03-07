@@ -116,6 +116,13 @@ class ReplayBuffer:
 
         manifest_url = f"{url_prefix}/manifest.json"
         logger.info("Replay saved locally: %s", manifest_url)
+
+        # Also generate a timelapse GIF for Slack delivery
+        gif_path = str(out_dir / "timelapse.gif")
+        gif_result = self.to_gif(gif_path)
+        if gif_result:
+            logger.info("Timelapse GIF generated: %s", gif_result)
+
         return manifest_url, frame_count
 
     async def upload_r2(

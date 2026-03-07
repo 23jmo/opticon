@@ -1,4 +1,6 @@
 import { createServer } from "node:http";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import next from "next";
 import { Server } from "socket.io";
 import { setIO } from "./lib/socket";
@@ -148,12 +150,24 @@ app.prepare().then(() => {
     if (slackSession) {
       const whiteboard = getWhiteboard(sessionId);
       const todoCount = session.todos.length;
-      const agentCount = session.agents.length;
+
+      // Collect GIF timelapses from all agents
+      const replayDir = process.env.REPLAY_DIR || resolve(process.cwd(), ".replays");
+      let gifPath: string | undefined;
+      for (const agent of session.agents) {
+        const agentGif = resolve(replayDir, sessionId, agent.id, "timelapse.gif");
+        if (existsSync(agentGif)) {
+          gifPath = agentGif; // Use the first available GIF (TODO: merge multi-agent GIFs)
+          break;
+        }
+      }
+
       postCompletionToSlack({
         sessionId,
         threadTs: slackSession.threadTs,
         channelId: slackSession.channelId,
         summary: whiteboard || `Completed ${todoCount} task(s).`,
+        gifPath,
       }).catch(console.error);
       completeSlackSession(slackSession.threadTs, slackSession.channelId).catch(
         console.error
