@@ -23,7 +23,9 @@ import {
   PlayCircle,
   PauseCircle,
   RotateCcw,
-  Clock
+  Clock,
+  Menu,
+  X
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -53,6 +55,7 @@ export default function PanopticonPage() {
   const [newPrompt, setNewPrompt] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const socketRef = useRef<Socket | null>(null);
 
   // Load Panopticon sessions
@@ -161,6 +164,7 @@ export default function PanopticonPage() {
       setAgents(session.agents);
       setThinkingEntries([]); // Reset thinking entries
       setThumbnails(new Map()); // Reset thumbnails
+      setSidebarOpen(false); // Close mobile sidebar
     }
   };
 
@@ -218,7 +222,16 @@ export default function PanopticonPage() {
           <Button
             variant="ghost"
             size="icon"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="md:hidden"
+          >
+            <Menu className="size-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => setShowHistory(true)}
+            className="hidden md:flex"
           >
             <History className="size-4" />
           </Button>
@@ -229,9 +242,33 @@ export default function PanopticonPage() {
       </header>
 
       {/* Main Content */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Mobile Sidebar Backdrop */}
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 z-40 bg-black/50 md:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+
         {/* Sidebar - Session List */}
-        <div className="w-80 flex flex-col border-r border-border">
+        <div className={cn(
+          "flex flex-col border-r border-border bg-background transition-transform duration-200 md:relative md:translate-x-0",
+          "fixed left-0 top-0 z-50 h-full w-80 md:w-80",
+          sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+        )}>
+          {/* Mobile Header */}
+          <div className="flex items-center justify-between p-4 border-b border-border md:hidden">
+            <h2 className="font-semibold">Sessions</h2>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setSidebarOpen(false)}
+            >
+              <X className="size-4" />
+            </Button>
+          </div>
+
           {/* Search & Create */}
           <div className="p-4 space-y-3 border-b border-border">
             <div className="relative">

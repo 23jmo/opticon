@@ -50,6 +50,7 @@ export const sessions = pgTable("sessions", {
   status: text("status").notNull(),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   completedAt: timestamp("completed_at", { mode: "date" }),
+  isPanopticon: text("is_panopticon").default("false"),
 });
 
 export const todos = pgTable("todos", {

@@ -3,6 +3,9 @@ import { auth } from "@/auth";
 import { persistSession, persistTodos } from "@/lib/db/session-persist";
 import { getSessionStore } from "@/lib/session-store";
 import { decomposeTasks } from "@/lib/orchestrator";
+import { spawnWorkers } from "@/lib/worker-manager";
+import { getIO } from "@/lib/socket";
+import { getUserSessionsWithTodos } from "@/lib/db/session-persist";
 import type { Todo } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -58,8 +61,29 @@ export async function POST(request: NextRequest) {
 
     // Persist to database if enabled
     if (enablePersistence) {
-      await persistSession(sessionId, userId, prompt, agentCount, "running");
+      await persistSession(sessionId, userId, prompt, agentCount, "running", true);
       await persistTodos(sessionId, todos);
+    }
+
+    // Emit task:created events for real-time updates
+    try {
+      const io = getIO();
+      for (const todo of todos) {
+        io.to(`session:${sessionId}`).emit("task:created", todo);
+      }
+    } catch {
+      console.warn("[panopticon] Socket.io not available, skipping emit");
+    }
+
+    // Auto-start workers for Panopticon sessions (no approval step)
+    try {
+      spawnWorkers(sessionId, agentCount);
+    } catch (error) {
+      console.error("[panopticon] Failed to spawn workers:", error);
+      return NextResponse.json(
+        { error: "Failed to start agents" },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({
@@ -91,15 +115,18 @@ export async function GET() {
     const store = getSessionStore();
     const userSessions = store.getUserSessions(authSession.user.id);
 
+    // Get persistent sessions from database
+    const persistentSessions = await getUserSessionsWithTodos(authSession.user.id);
+
     // Filter for Panopticon sessions only
-    const panopticonSessions = userSessions
+    const memorySessions = userSessions
       .filter(session => session.isPanopticon)
       .map(session => ({
         id: session.id,
         prompt: session.prompt,
         agentCount: session.agentCount,
         status: session.status,
-        createdAt: session.createdAt,
+        createdAt: new Date(session.createdAt),
         agents: session.agents.map(agent => ({
           id: agent.id,
           name: agent.name,
@@ -113,7 +140,34 @@ export async function GET() {
         totalTasks: session.todos.length,
       }));
 
-    return NextResponse.json({ sessions: panopticonSessions });
+    const dbSessions = persistentSessions
+      .filter(session => session.isPanopticon === "true")
+      .map(session => ({
+        id: session.id,
+        prompt: session.prompt,
+        agentCount: session.agentCount,
+        status: session.status,
+        createdAt: session.createdAt,
+        agents: [], // No agents info from DB
+        todos: session.todos,
+        activeTasks: session.todos.filter(t => t.status === "assigned").length,
+        completedTasks: session.todos.filter(t => t.status === "completed").length,
+        totalTasks: session.todos.length,
+      }));
+
+    // Merge sessions, prioritizing in-memory ones (more up-to-date)
+    const sessionMap = new Map();
+
+    // Add DB sessions first
+    dbSessions.forEach(session => sessionMap.set(session.id, session));
+
+    // Override with in-memory sessions
+    memorySessions.forEach(session => sessionMap.set(session.id, session));
+
+    const allPanopticonSessions = Array.from(sessionMap.values())
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    return NextResponse.json({ sessions: allPanopticonSessions });
   } catch (error) {
     console.error("[panopticon] Failed to fetch sessions:", error);
     return NextResponse.json(

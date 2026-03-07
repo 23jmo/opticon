@@ -278,7 +278,11 @@ async def main():
     # --- Boot E2B sandbox ---
     desktop = None
     try:
-        desktop = Sandbox.create(timeout=1200)
+        # Check if this is a Panopticon session for extended timeout
+        is_panopticon = os.environ.get("PANOPTICON_MODE", "false").lower() == "true"
+        sandbox_timeout = 7200 if is_panopticon else 1200  # 2 hours for Panopticon, 20 min for regular
+
+        desktop = Sandbox.create(timeout=sandbox_timeout)
         desktop.stream.start()
         stream_url = desktop.stream.get_url()
         await emit("agent:stream_ready", {"streamUrl": stream_url})
@@ -301,6 +305,43 @@ async def main():
 
     # --- Memory manager (per-user, optional) ---
     memory_mgr = MemoryManager() if user_id else None
+
+    # --- Thumbnail generation for Panopticon ---
+    thumbnail_task = None
+
+    async def generate_thumbnails():
+        """Periodically capture and emit thumbnail screenshots for Panopticon."""
+        while not terminated.is_set():
+            try:
+                # Take screenshot for thumbnail
+                raw_bytes = e2b_tools.screenshot_raw_bytes()
+
+                # Create smaller thumbnail (300x200 max)
+                img = Image.open(BytesIO(raw_bytes))
+                img.thumbnail((300, 200), Image.Resampling.LANCZOS)
+
+                # Convert to JPEG and base64
+                thumbnail_buf = BytesIO()
+                img.save(thumbnail_buf, format="JPEG", quality=60)
+                thumbnail_b64 = base64.b64encode(thumbnail_buf.getvalue()).decode("utf-8")
+
+                # Emit thumbnail update
+                await emit("agent:thumbnail", {
+                    "thumbnail": thumbnail_b64,
+                    "timestamp": int(asyncio.get_event_loop().time() * 1000)
+                })
+
+                # Wait 10 seconds before next thumbnail
+                await asyncio.sleep(10)
+
+            except Exception as e:
+                logger.warning("Failed to generate thumbnail: %s", e)
+                await asyncio.sleep(5)  # Shorter delay on error
+
+    # Start thumbnail generation task for Panopticon sessions
+    is_panopticon = os.environ.get("PANOPTICON_MODE", "false").lower() == "true"
+    if is_panopticon and os.environ.get("ENABLE_THUMBNAILS", "true").lower() == "true":
+        thumbnail_task = asyncio.create_task(generate_thumbnails())
 
     try:
         while not terminated.is_set():
@@ -380,6 +421,14 @@ async def main():
             )
 
     finally:
+        # Cancel thumbnail generation
+        if thumbnail_task:
+            thumbnail_task.cancel()
+            try:
+                await thumbnail_task
+            except asyncio.CancelledError:
+                pass
+
         # Save/upload replay frames before killing sandbox
         if replay_buffer.frame_count > 0:
             try:

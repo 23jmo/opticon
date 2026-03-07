@@ -11,7 +11,8 @@ export async function persistSession(
   userId: string,
   prompt: string,
   agentCount: number,
-  status: string
+  status: string,
+  isPanopticon: boolean = false
 ) {
   await db.insert(sessions).values({
     id,
@@ -20,6 +21,7 @@ export async function persistSession(
     agentCount,
     status,
     createdAt: new Date(),
+    isPanopticon: isPanopticon ? "true" : "false",
   });
 }
 
