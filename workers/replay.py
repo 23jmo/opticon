@@ -50,6 +50,21 @@ class ReplayBuffer:
         except Exception as e:
             logger.warning("Failed to capture replay frame: %s", e)
 
+    def to_gif(self, output_path: str, max_size_mb: float = 20) -> str | None:
+        """
+        Generate an animated GIF from the buffered frames.
+
+        Args:
+            output_path: File path for the output GIF.
+            max_size_mb: Maximum allowed file size in MB.
+
+        Returns:
+            The output path on success, None on failure.
+        """
+        from gif import generate_gif
+
+        return generate_gif(self._frames, output_path, max_size_mb)
+
     def save_local(
         self,
         session_id: str,

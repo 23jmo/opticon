@@ -76,3 +76,34 @@ export const replays = pgTable("replays", {
   frameCount: integer("frame_count").notNull(),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 });
+
+export const slackThreadSessions = pgTable("slack_thread_sessions", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  threadTs: text("thread_ts").notNull(),
+  channelId: text("channel_id").notNull(),
+  teamId: text("team_id").notNull(),
+  slackUserId: text("slack_user_id").notNull(),
+  sessionId: text("session_id")
+    .notNull()
+    .references(() => sessions.id, { onDelete: "cascade" }),
+  status: text("status").notNull(),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+});
+
+export const oauthConnections = pgTable("oauth_connections", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(),
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token"),
+  expiresAt: timestamp("expires_at", { mode: "date" }),
+  scopes: text("scopes"),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+});
