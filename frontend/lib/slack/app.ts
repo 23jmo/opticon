@@ -162,9 +162,14 @@ function registerEventHandlers(app: App): void {
 
       const channelId = body.channel?.id;
       const messageTs = body.message.ts;
-      if (!channelId || !messageTs) return;
+      const threadTs: string | undefined =
+        body.message.thread_ts ?? body.message.ts;
+      if (!channelId || !messageTs || !threadTs) return;
 
-      // Update the message to show that work is starting
+      // Actually spawn workers now that the user confirmed
+      await executeSlackSession(threadTs, channelId);
+
+      // Only update the message after confirming execution proceeded
       const blocks = body.message.blocks as KnownBlock[];
       const updatedBlocks = blocks.filter(
         (b) => b.type !== "actions",
@@ -180,13 +185,21 @@ function registerEventHandlers(app: App): void {
         text: "Starting...",
         blocks: updatedBlocks,
       });
-
-      // Actually spawn workers now that the user confirmed
-      const threadTs: string =
-        body.message.thread_ts ?? body.message.ts;
-      await executeSlackSession(threadTs, channelId);
     } catch (error) {
       logger.error("Error handling opticon_confirm action", error);
+      try {
+        const channelId = body.channel?.id;
+        const threadTs = (body as Record<string, any>).message?.thread_ts ?? (body as Record<string, any>).message?.ts;
+        if (channelId && threadTs) {
+          await client.chat.postMessage({
+            channel: channelId,
+            thread_ts: threadTs,
+            text: "Sorry, something went wrong while starting your tasks. Please try again.",
+          });
+        }
+      } catch {
+        logger.error("Failed to post error message to Slack after confirm failure");
+      }
     }
   });
 

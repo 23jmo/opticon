@@ -135,6 +135,10 @@ export async function executeSlackSession(
 
   // Guard: only start if we're waiting for approval
   if (slackSession.status !== "pending_approval") {
+    console.warn(
+      `[slack] executeSlackSession called but session ${slackSession.sessionId} ` +
+      `is in status "${slackSession.status}", expected "pending_approval". Skipping.`,
+    );
     return;
   }
 

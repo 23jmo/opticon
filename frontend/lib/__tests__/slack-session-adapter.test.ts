@@ -102,7 +102,7 @@ describe("createSlackSession", () => {
     );
     expect(persistSession).toHaveBeenCalledWith(
       "mock-uuid-1234",
-      "U456",
+      null, // Slack sessions have no platform userId
       "build an app",
       2,
       "clarifying",

@@ -556,6 +556,8 @@ async def main():
                     except Exception:
                         pass
         await emit("agent:terminated", {})
+        # Allow queued socket events (replay:complete, agent:terminated) to flush
+        await asyncio.sleep(0.5)
         await sio.disconnect()
         logger.info("Worker shut down")
 

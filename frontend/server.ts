@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import next from "next";
 import { Server } from "socket.io";
@@ -48,8 +49,8 @@ import {
 } from "./lib/db/session-persist";
 import { persistReplay } from "./lib/db/replay-persist";
 import { decomposeTasks } from "./lib/orchestrator";
-import { createSlackApp } from "./lib/slack/app";
 import {
+  createSlackApp,
   getSlackApp,
   postMilestoneToSlack,
   postCompletionToSlack,
@@ -627,7 +628,8 @@ app.prepare().then(() => {
         // Start 5-min idle timer (agents stay alive for follow-ups)
         startIdleTimer(sessionId);
 
-        // Post completion to Slack immediately (GIF uploads separately via replay:complete)
+        // Post completion to Slack immediately and shut down workers
+        // so the GIF saves and uploads without waiting for the 5-min idle timer
         const slackSession = getSlackSessionBySessionId(sessionId);
         if (slackSession) {
           const whiteboard = getWhiteboard(sessionId);
@@ -641,6 +643,10 @@ app.prepare().then(() => {
           completeSlackSession(slackSession.threadTs, slackSession.channelId).catch(
             console.error
           );
+
+          // Tell workers to shut down now — triggers finally block which saves GIF
+          clearIdleTimer(sessionId);
+          io.to(room).emit("task:none");
         }
       }
       // Otherwise: no pending tasks but session not complete — agent idles
@@ -691,13 +697,13 @@ app.prepare().then(() => {
           try {
             const slackApp = getSlackApp();
             if (slackApp) {
-              const fileContent = readFileSync(agentGif);
+              const fileContent = await readFile(agentGif);
               await slackApp.client.files.uploadV2({
                 channel_id: slackSession.channelId,
                 thread_ts: slackSession.threadTs,
                 file: fileContent,
-                filename: "timelapse.gif",
-                title: "Session Timelapse",
+                filename: `timelapse-${agentId.slice(0, 8)}.gif`,
+                title: `Agent ${agentId.slice(0, 8)} Timelapse`,
               });
               console.log(`[server] Session ${sessionId} — GIF uploaded to Slack`);
             }
