@@ -192,7 +192,7 @@ export function restoreSessionFromDb(dbSession: {
   prompt: string;
   agentCount: number;
   status: string;
-  userId: string;
+  userId: string | null;
   createdAt: Date | null;
   completedAt: Date | null;
   todos: Array<{ id: string; description: string; status: string; assignedTo: string | null; result: string | null }>;

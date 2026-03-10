@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import next from "next";
 import { Server } from "socket.io";
@@ -50,6 +50,7 @@ import { persistReplay } from "./lib/db/replay-persist";
 import { decomposeTasks } from "./lib/orchestrator";
 import { createSlackApp } from "./lib/slack/app";
 import {
+  getSlackApp,
   postMilestoneToSlack,
   postCompletionToSlack,
   postErrorToSlack,
@@ -191,34 +192,7 @@ app.prepare().then(() => {
       console.error
     );
 
-    // Notify Slack if this session is linked to a thread
-    const slackSession = getSlackSessionBySessionId(sessionId);
-    if (slackSession) {
-      const whiteboard = getWhiteboard(sessionId);
-      const todoCount = session.todos.length;
-
-      // Collect GIF timelapses from all agents
-      const replayDir = process.env.REPLAY_DIR || resolve(process.cwd(), ".replays");
-      let gifPath: string | undefined;
-      for (const agent of session.agents) {
-        const agentGif = resolve(replayDir, sessionId, agent.id, "timelapse.gif");
-        if (existsSync(agentGif)) {
-          gifPath = agentGif; // Use the first available GIF (TODO: merge multi-agent GIFs)
-          break;
-        }
-      }
-
-      postCompletionToSlack({
-        sessionId,
-        threadTs: slackSession.threadTs,
-        channelId: slackSession.channelId,
-        summary: whiteboard || `Completed ${todoCount} task(s).`,
-        gifPath,
-      }).catch(console.error);
-      completeSlackSession(slackSession.threadTs, slackSession.channelId).catch(
-        console.error
-      );
-    }
+    // Slack notification already posted when tasks completed (see task:completed handler)
   }
 
   /**
@@ -652,6 +626,22 @@ app.prepare().then(() => {
 
         // Start 5-min idle timer (agents stay alive for follow-ups)
         startIdleTimer(sessionId);
+
+        // Post completion to Slack immediately (GIF uploads separately via replay:complete)
+        const slackSession = getSlackSessionBySessionId(sessionId);
+        if (slackSession) {
+          const whiteboard = getWhiteboard(sessionId);
+          const todoCount = getSession(sessionId)?.todos.length ?? 0;
+          postCompletionToSlack({
+            sessionId,
+            threadTs: slackSession.threadTs,
+            channelId: slackSession.channelId,
+            summary: whiteboard || `Completed ${todoCount} task(s).`,
+          }).catch(console.error);
+          completeSlackSession(slackSession.threadTs, slackSession.channelId).catch(
+            console.error
+          );
+        }
       }
       // Otherwise: no pending tasks but session not complete — agent idles
     });
@@ -691,6 +681,31 @@ app.prepare().then(() => {
         manifestUrl,
         frameCount,
       });
+
+      // Upload GIF to Slack thread if this session is linked
+      const slackSession = getSlackSessionBySessionId(sessionId);
+      if (slackSession) {
+        const replayDir = process.env.REPLAY_DIR || resolve(process.cwd(), ".replays");
+        const agentGif = resolve(replayDir, sessionId, agentId, "timelapse.gif");
+        if (existsSync(agentGif)) {
+          try {
+            const slackApp = getSlackApp();
+            if (slackApp) {
+              const fileContent = readFileSync(agentGif);
+              await slackApp.client.files.uploadV2({
+                channel_id: slackSession.channelId,
+                thread_ts: slackSession.threadTs,
+                file: fileContent,
+                filename: "timelapse.gif",
+                title: "Session Timelapse",
+              });
+              console.log(`[server] Session ${sessionId} — GIF uploaded to Slack`);
+            }
+          } catch (err) {
+            console.error(`[server] Failed to upload GIF to Slack:`, err);
+          }
+        }
+      }
     });
 
     socket.on("agent:terminated", (data: AgentTerminatedEvent) => {

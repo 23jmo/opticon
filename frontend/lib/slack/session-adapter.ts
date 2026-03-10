@@ -72,18 +72,19 @@ export async function createSlackSession(
   createSession(sessionId, prompt, agentCount, slackUserId);
 
   // Persist to database
-  await persistSession(sessionId, slackUserId, prompt, agentCount, "clarifying");
+  await persistSession(sessionId, null, prompt, agentCount, "clarifying");
 
   return slackSession;
 }
 
 /**
- * Start a previously created Slack session: decompose the prompt into tasks,
- * persist them, update statuses, and spawn Python agent workers.
+ * Decompose the prompt into tasks without spawning workers.
  *
- * Returns the decomposed task descriptions.
+ * Calls the orchestrator to split the prompt, adds todos to the in-memory
+ * session store, persists them, and sets status to `"pending_approval"`.
+ * The user must confirm (via `executeSlackSession`) before work begins.
  */
-export async function startSlackSession(
+export async function decomposeSlackSession(
   threadTs: string,
   channelId: string,
 ): Promise<{ descriptions: string[] }> {
@@ -108,14 +109,47 @@ export async function startSlackSession(
   // Persist tasks to the database
   await persistTodos(slackSession.sessionId, todos);
 
+  // Mark as pending approval — workers are NOT spawned yet
+  slackSession.status = "pending_approval";
+  await persistSessionStatus(slackSession.sessionId, "pending_approval");
+
+  return { descriptions };
+}
+
+/**
+ * Execute a previously decomposed Slack session by spawning workers.
+ *
+ * Guards against double-execution: only proceeds if the session is in
+ * `"pending_approval"` status.
+ */
+export async function executeSlackSession(
+  threadTs: string,
+  channelId: string,
+): Promise<void> {
+  const slackSession = slackSessions.get(threadKey(channelId, threadTs));
+  if (!slackSession) {
+    throw new Error(
+      `No Slack session found for channel=${channelId} thread=${threadTs}`,
+    );
+  }
+
+  // Guard: only start if we're waiting for approval
+  if (slackSession.status !== "pending_approval") {
+    return;
+  }
+
+  const session = getSession(slackSession.sessionId);
+  if (!session) {
+    throw new Error(`Panopticon session ${slackSession.sessionId} not found`);
+  }
+
   // Transition to running
   slackSession.status = "running";
   session.status = "running";
+  await persistSessionStatus(slackSession.sessionId, "running");
 
   // Spawn Python agent workers
   spawnWorkers(slackSession.sessionId, session.agentCount);
-
-  return { descriptions };
 }
 
 /**

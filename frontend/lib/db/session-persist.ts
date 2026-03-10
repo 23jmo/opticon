@@ -8,7 +8,7 @@ import type { Todo, Agent } from "../types";
  */
 export async function persistSession(
   id: string,
-  userId: string,
+  userId: string | null,
   prompt: string,
   agentCount: number,
   status: string,

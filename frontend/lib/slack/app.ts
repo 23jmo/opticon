@@ -12,7 +12,8 @@ import * as path from "node:path";
 
 import {
   createSlackSession,
-  startSlackSession,
+  decomposeSlackSession,
+  executeSlackSession,
   getSlackSession,
   getSlackSessionBySessionId,
   stopSlackSession,
@@ -90,7 +91,7 @@ function registerEventHandlers(app: App): void {
 
       const threadTs = event.thread_ts ?? event.ts;
       const channelId = event.channel;
-      const slackUserId = event.user;
+      const slackUserId = event.user ?? "unknown";
       const teamId = event.team ?? "unknown";
 
       // If a session already exists for this thread, treat as follow-up context
@@ -125,8 +126,8 @@ function registerEventHandlers(app: App): void {
         blocks: placeholderBlocks,
       });
 
-      // Decompose the prompt into subtasks
-      const { descriptions } = await startSlackSession(threadTs, channelId);
+      // Decompose the prompt into subtasks (does NOT spawn workers yet)
+      const { descriptions } = await decomposeSlackSession(threadTs, channelId);
 
       // Update the message with the real task breakdown
       const confirmBlocks = buildConfirmationMessage(prompt, descriptions);
@@ -179,6 +180,11 @@ function registerEventHandlers(app: App): void {
         text: "Starting...",
         blocks: updatedBlocks,
       });
+
+      // Actually spawn workers now that the user confirmed
+      const threadTs: string =
+        body.message.thread_ts ?? body.message.ts;
+      await executeSlackSession(threadTs, channelId);
     } catch (error) {
       logger.error("Error handling opticon_confirm action", error);
     }

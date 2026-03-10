@@ -14,7 +14,8 @@ export {
 
 export {
   createSlackSession,
-  startSlackSession,
+  decomposeSlackSession,
+  executeSlackSession,
   getSlackSession,
   getSlackSessionBySessionId,
   updateSlackSessionStatus,

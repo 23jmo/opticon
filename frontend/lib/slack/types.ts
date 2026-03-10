@@ -9,6 +9,7 @@
 /** Status of a Slack thread session through its lifecycle. */
 export type SlackThreadSessionStatus =
   | "clarifying"
+  | "pending_approval"
   | "running"
   | "waiting_input"
   | "completed"
