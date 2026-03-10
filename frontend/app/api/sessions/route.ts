@@ -10,7 +10,7 @@ import {
   persistTodos,
   persistSessionStatus,
 } from "@/lib/db/session-persist";
-import { decomposeTasks } from "@/lib/orchestrator";
+import { decomposeTasks, type DecomposedTask } from "@/lib/orchestrator";
 
 export async function POST(request: Request) {
   const authSession = await auth();
@@ -65,7 +65,7 @@ export async function POST(request: Request) {
   ).catch(console.error);
 
   // Decompose prompt into TODOs via Dedalus
-  let todoDescriptions: string[];
+  let todoDescriptions: DecomposedTask[];
   try {
     todoDescriptions = await decomposeTasks(prompt.trim(), agentCount);
   } catch (error) {

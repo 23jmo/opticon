@@ -23,6 +23,8 @@ export interface Todo {
   assignedTo: string | null;
   result?: string;
   retryCount?: number;
+  /** Sequential lane index. Tasks in the same lane run in order; different lanes run in parallel. */
+  lane?: number;
 }
 
 export interface Agent {
@@ -123,6 +125,13 @@ export interface AgentSandboxExpiredEvent {
   agentId: string;
 }
 
+export interface AgentCheckpointEvent {
+  agentId: string;
+  step: number;
+  totalSteps: number;
+  thumbnail?: string; // base64 JPEG
+}
+
 export interface SessionCompleteEvent {
   sessionId: string;
 }
@@ -166,6 +175,7 @@ export interface ServerToClientEvents {
   }) => void;
   "task:none": () => void;
   "session:stop": (payload: { sessionId: string }) => void;
+  "session:checkpoint_resume": (payload: { sessionId: string }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -188,6 +198,7 @@ export interface ClientToServerEvents {
   "whiteboard:updated": (payload: WhiteboardUpdatedEvent) => void;
   "replay:complete": (payload: ReplayCompleteEvent) => void;
   "agent:thumbnail": (payload: AgentThumbnailEvent) => void;
+  "agent:checkpoint": (payload: AgentCheckpointEvent) => void;
   "dashboard:join": () => void;
   "dashboard:leave": () => void;
 }

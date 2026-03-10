@@ -9,6 +9,7 @@
 /** Status of a Slack thread session through its lifecycle. */
 export type SlackThreadSessionStatus =
   | "clarifying"
+  | "pending_approval"
   | "running"
   | "waiting_input"
   | "completed"
@@ -54,6 +55,14 @@ export interface MilestoneUpdate {
   message: string;
   /** ISO 8601 timestamp of the milestone event. */
   timestamp: string;
+}
+
+/** Per-task result line for the completion message. */
+export interface TaskResultLine {
+  description: string;
+  status: "completed" | "failed" | "skipped";
+  /** One-line result summary, truncated to ~80 chars. */
+  summary?: string;
 }
 
 /** Result payload delivered to Slack when a task completes. */

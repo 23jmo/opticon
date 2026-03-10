@@ -15,7 +15,7 @@ import type {
   DividerBlock,
 } from "@slack/types";
 import type { Button } from "@slack/types";
-import type { ClarificationQuestion } from "./types";
+import type { ClarificationQuestion, TaskResultLine } from "./types";
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -51,6 +51,12 @@ function button(
   if (style) btn.style = style;
   if (value) btn.value = value;
   return btn;
+}
+
+function dashboardUrl(sessionId: string): string | undefined {
+  const base = process.env.APP_URL;
+  if (!base) return undefined;
+  return `${base}/session/${sessionId}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,12 +125,13 @@ export function buildClarificationMessage(
 export function buildConfirmationMessage(
   taskSummary: string,
   subtaskDescriptions: string[],
+  sessionId?: string,
 ): KnownBlock[] {
   const numberedList = subtaskDescriptions
     .map((desc, i) => `${i + 1}. ${desc}`)
     .join("\n");
 
-  return [
+  const blocks: KnownBlock[] = [
     header("Here's what I'll do:"),
     {
       type: "section",
@@ -138,6 +145,16 @@ export function buildConfirmationMessage(
       ],
     } satisfies ActionsBlock,
   ];
+
+  const link = sessionId ? dashboardUrl(sessionId) : undefined;
+  if (link) {
+    blocks.push({
+      type: "context",
+      elements: [mrkdwn(`<${link}|View in dashboard>`)],
+    } satisfies ContextBlock);
+  }
+
+  return blocks;
 }
 
 /**
@@ -169,29 +186,52 @@ export function buildMilestoneMessage(
 
 /**
  * Build a rich completion message posted when all tasks are done.
+ * Shows per-task results with status markers and one-line summaries.
  */
 export function buildCompletionMessage(
-  summary: string,
+  overallSummary: string,
+  taskResults: TaskResultLine[],
   agentCount: number,
-  taskCount: number,
   duration: string,
+  sessionId?: string,
 ): KnownBlock[] {
-  return [
-    header("Task Complete"),
+  const statusLabel: Record<TaskResultLine["status"], string> = {
+    completed: "*Done*",
+    failed: "*Failed*",
+    skipped: "*Skipped*",
+  };
+
+  const taskLines = taskResults
+    .map((t) => {
+      let line = `${statusLabel[t.status]} — ${t.description}`;
+      if (t.summary) {
+        line += `\n  _${t.summary}_`;
+      }
+      return line;
+    })
+    .join("\n\n");
+
+  const blocks: KnownBlock[] = [
+    header("All done"),
     {
       type: "section",
-      text: mrkdwn(summary),
+      text: mrkdwn(taskLines || overallSummary),
     } satisfies SectionBlock,
     divider(),
-    {
-      type: "context",
-      elements: [
-        mrkdwn(
-          `*Agents:* ${agentCount}  |  *Tasks:* ${taskCount}  |  *Duration:* ${duration}`,
-        ),
-      ],
-    } satisfies ContextBlock,
   ];
+
+  let statsText = `*Agents:* ${agentCount}  |  *Tasks:* ${taskResults.length}  |  *Duration:* ${duration}`;
+  const link = sessionId ? dashboardUrl(sessionId) : undefined;
+  if (link) {
+    statsText += `\n<${link}|View in dashboard>`;
+  }
+
+  blocks.push({
+    type: "context",
+    elements: [mrkdwn(statsText)],
+  } satisfies ContextBlock);
+
+  return blocks;
 }
 
 /**
@@ -226,6 +266,59 @@ export function buildErrorMessage(
       button("Abort", "opticon_abort", "danger"),
     ],
   } satisfies ActionsBlock);
+
+  return blocks;
+}
+
+/**
+ * Build a checkpoint message posted when an agent reaches a step interval
+ * (e.g. every 100 steps) to ask the user whether to continue or stop.
+ */
+export function buildCheckpointMessage(
+  agentName: string,
+  step: number,
+  totalSteps: number,
+  screenshotUrl?: string,
+  accomplishment?: string,
+  sessionId?: string,
+): KnownBlock[] {
+  let bodyText = `*${agentName}* has completed *${step}* of ${totalSteps} max steps.`;
+  if (accomplishment) {
+    bodyText += `\n\n_Recently: ${accomplishment}_`;
+  }
+  bodyText += `\n\nShould I keep going?`;
+
+  const blocks: KnownBlock[] = [
+    header("Checkpoint"),
+    {
+      type: "section",
+      text: mrkdwn(bodyText),
+    } satisfies SectionBlock,
+  ];
+
+  if (screenshotUrl) {
+    blocks.push({
+      type: "image",
+      image_url: screenshotUrl,
+      alt_text: "Current sandbox state",
+    } satisfies ImageBlock);
+  }
+
+  blocks.push({
+    type: "actions",
+    elements: [
+      button("Continue", "opticon_checkpoint_continue", "primary"),
+      button("Stop", "opticon_checkpoint_stop", "danger"),
+    ],
+  } satisfies ActionsBlock);
+
+  const link = sessionId ? dashboardUrl(sessionId) : undefined;
+  if (link) {
+    blocks.push({
+      type: "context",
+      elements: [mrkdwn(`<${link}|View in dashboard>`)],
+    } satisfies ContextBlock);
+  }
 
   return blocks;
 }

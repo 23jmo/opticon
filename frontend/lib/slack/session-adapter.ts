@@ -16,6 +16,7 @@ import {
   persistSession,
   persistTodos,
   persistSessionStatus,
+  persistAgentCount,
 } from "../db/session-persist";
 
 // ---------------------------------------------------------------------------
@@ -69,21 +70,23 @@ export async function createSlackSession(
   slackSessions.set(threadKey(channelId, threadTs), slackSession);
 
   // Register in the Panopticon in-memory session store
-  createSession(sessionId, prompt, agentCount, slackUserId);
+  // No userId — Slack-originated sessions are viewable by anyone on the dashboard
+  createSession(sessionId, prompt, agentCount);
 
   // Persist to database
-  await persistSession(sessionId, slackUserId, prompt, agentCount, "clarifying");
+  await persistSession(sessionId, null, prompt, agentCount, "clarifying");
 
   return slackSession;
 }
 
 /**
- * Start a previously created Slack session: decompose the prompt into tasks,
- * persist them, update statuses, and spawn Python agent workers.
+ * Decompose the prompt into tasks without spawning workers.
  *
- * Returns the decomposed task descriptions.
+ * Calls the orchestrator to split the prompt, adds todos to the in-memory
+ * session store, persists them, and sets status to `"pending_approval"`.
+ * The user must confirm (via `executeSlackSession`) before work begins.
  */
-export async function startSlackSession(
+export async function decomposeSlackSession(
   threadTs: string,
   channelId: string,
 ): Promise<{ descriptions: string[] }> {
@@ -99,23 +102,73 @@ export async function startSlackSession(
     throw new Error(`Panopticon session ${slackSession.sessionId} not found`);
   }
 
-  // Decompose the prompt into independent tasks
-  const descriptions = await decomposeTasks(session.prompt, session.agentCount);
+  // Let the LLM break the request into granular tasks grouped by lane
+  const MAX_SLACK_LANES = 4;
+  const decomposed = await decomposeTasks(
+    session.prompt,
+    undefined,
+    10,
+    MAX_SLACK_LANES,
+  );
+
+  // One agent per lane
+  const laneCount = new Set(decomposed.map((t) => t.lane)).size;
+  session.agentCount = Math.max(laneCount, 1);
 
   // Add tasks to the in-memory session store
-  const todos = addTodos(slackSession.sessionId, descriptions);
+  const todos = addTodos(slackSession.sessionId, decomposed);
+  const descriptions = decomposed.map((t) => t.description);
 
   // Persist tasks to the database
   await persistTodos(slackSession.sessionId, todos);
 
+  // Mark as pending approval — workers are NOT spawned yet
+  // Also persist the updated agent count (LLM may have chosen > 1)
+  slackSession.status = "pending_approval";
+  await persistSessionStatus(slackSession.sessionId, "pending_approval");
+  await persistAgentCount(slackSession.sessionId, session.agentCount);
+
+  return { descriptions };
+}
+
+/**
+ * Execute a previously decomposed Slack session by spawning workers.
+ *
+ * Guards against double-execution: only proceeds if the session is in
+ * `"pending_approval"` status.
+ */
+export async function executeSlackSession(
+  threadTs: string,
+  channelId: string,
+): Promise<void> {
+  const slackSession = slackSessions.get(threadKey(channelId, threadTs));
+  if (!slackSession) {
+    throw new Error(
+      `No Slack session found for channel=${channelId} thread=${threadTs}`,
+    );
+  }
+
+  // Guard: only start if we're waiting for approval
+  if (slackSession.status !== "pending_approval") {
+    console.warn(
+      `[slack] executeSlackSession called but session ${slackSession.sessionId} ` +
+      `is in status "${slackSession.status}", expected "pending_approval". Skipping.`,
+    );
+    return;
+  }
+
+  const session = getSession(slackSession.sessionId);
+  if (!session) {
+    throw new Error(`Panopticon session ${slackSession.sessionId} not found`);
+  }
+
   // Transition to running
   slackSession.status = "running";
   session.status = "running";
+  await persistSessionStatus(slackSession.sessionId, "running");
 
   // Spawn Python agent workers
   spawnWorkers(slackSession.sessionId, session.agentCount);
-
-  return { descriptions };
 }
 
 /**

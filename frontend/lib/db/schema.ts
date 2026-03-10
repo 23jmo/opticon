@@ -43,7 +43,6 @@ export const accounts = pgTable(
 export const sessions = pgTable("sessions", {
   id: text("id").primaryKey(),
   userId: text("user_id")
-    .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   prompt: text("prompt").notNull(),
   agentCount: integer("agent_count").notNull(),
@@ -62,6 +61,7 @@ export const todos = pgTable("todos", {
   status: text("status").notNull(),
   assignedTo: text("assigned_to"),
   result: text("result"),
+  lane: integer("lane"),
 });
 
 export const replays = pgTable("replays", {

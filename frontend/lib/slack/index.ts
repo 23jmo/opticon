@@ -10,11 +10,13 @@ export {
   postCompletionToSlack,
   postErrorToSlack,
   postDestructiveConfirmToSlack,
+  postCheckpointToSlack,
 } from "./app";
 
 export {
   createSlackSession,
-  startSlackSession,
+  decomposeSlackSession,
+  executeSlackSession,
   getSlackSession,
   getSlackSessionBySessionId,
   updateSlackSessionStatus,
@@ -29,7 +31,11 @@ export {
   buildCompletionMessage,
   buildErrorMessage,
   buildDestructiveConfirmMessage,
+  buildCheckpointMessage,
 } from "./blocks";
+
+export { summarizeActions } from "./summarize-actions";
+export type { BufferedAction } from "./summarize-actions";
 
 export type {
   SlackThreadSession,
@@ -37,4 +43,5 @@ export type {
   ClarificationQuestion,
   MilestoneUpdate,
   SlackTaskResult,
+  TaskResultLine,
 } from "./types";

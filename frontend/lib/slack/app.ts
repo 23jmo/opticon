@@ -12,7 +12,8 @@ import * as path from "node:path";
 
 import {
   createSlackSession,
-  startSlackSession,
+  decomposeSlackSession,
+  executeSlackSession,
   getSlackSession,
   getSlackSessionBySessionId,
   stopSlackSession,
@@ -24,9 +25,12 @@ import {
   buildCompletionMessage,
   buildErrorMessage,
   buildDestructiveConfirmMessage,
+  buildCheckpointMessage,
 } from "./blocks";
 
-import type { SlackTaskResult } from "./types";
+import { getIO } from "../socket";
+import type { SlackTaskResult, TaskResultLine } from "./types";
+import { getSession } from "../session-store";
 
 // ---------------------------------------------------------------------------
 // Module-level app instance
@@ -113,31 +117,32 @@ function registerEventHandlers(app: App): void {
         prompt,
       );
 
-      // Post an initial placeholder while we decompose
-      const placeholderBlocks = buildConfirmationMessage(
-        "Analyzing your request...",
-        ["Decomposing tasks..."],
-      );
-      const initialMsg = await client.chat.postMessage({
+      // Post a simple text ack while we decompose
+      await client.chat.postMessage({
         channel: channelId,
         thread_ts: threadTs,
-        text: "Analyzing your request...",
-        blocks: placeholderBlocks,
+        text: "Got it — I'm breaking this down into tasks...",
       });
 
-      // Decompose the prompt into subtasks
-      const { descriptions } = await startSlackSession(threadTs, channelId);
+      // Decompose the prompt into subtasks (does NOT spawn workers yet)
+      const { descriptions } = await decomposeSlackSession(threadTs, channelId);
 
-      // Update the message with the real task breakdown
-      const confirmBlocks = buildConfirmationMessage(prompt, descriptions);
-      if (initialMsg.ts) {
-        await client.chat.update({
-          channel: channelId,
-          ts: initialMsg.ts,
-          text: prompt,
-          blocks: confirmBlocks,
-        });
-      }
+      // Look up the sessionId for the dashboard link
+      const slackSess = getSlackSession(threadTs, channelId);
+      const sessionId = slackSess?.sessionId;
+
+      // Post the real confirmation as a new message (with dashboard link)
+      const confirmBlocks = buildConfirmationMessage(
+        prompt,
+        descriptions,
+        sessionId,
+      );
+      await client.chat.postMessage({
+        channel: channelId,
+        thread_ts: threadTs,
+        text: prompt,
+        blocks: confirmBlocks,
+      });
     } catch (error) {
       logger.error("Error handling app_mention event", error);
       try {
@@ -161,9 +166,14 @@ function registerEventHandlers(app: App): void {
 
       const channelId = body.channel?.id;
       const messageTs = body.message.ts;
-      if (!channelId || !messageTs) return;
+      const threadTs: string | undefined =
+        body.message.thread_ts ?? body.message.ts;
+      if (!channelId || !messageTs || !threadTs) return;
 
-      // Update the message to show that work is starting
+      // Actually spawn workers now that the user confirmed
+      await executeSlackSession(threadTs, channelId);
+
+      // Only update the message after confirming execution proceeded
       const blocks = body.message.blocks as KnownBlock[];
       const updatedBlocks = blocks.filter(
         (b) => b.type !== "actions",
@@ -181,6 +191,19 @@ function registerEventHandlers(app: App): void {
       });
     } catch (error) {
       logger.error("Error handling opticon_confirm action", error);
+      try {
+        const channelId = body.channel?.id;
+        const threadTs = (body as Record<string, any>).message?.thread_ts ?? (body as Record<string, any>).message?.ts;
+        if (channelId && threadTs) {
+          await client.chat.postMessage({
+            channel: channelId,
+            thread_ts: threadTs,
+            text: "Sorry, something went wrong while starting your tasks. Please try again.",
+          });
+        }
+      } catch {
+        logger.error("Failed to post error message to Slack after confirm failure");
+      }
     }
   });
 
@@ -308,6 +331,77 @@ function registerEventHandlers(app: App): void {
     }
   });
 
+  // ---- Checkpoint: Continue -------------------------------------------------
+  app.action("opticon_checkpoint_continue", async ({ ack, body, client, logger }) => {
+    await ack();
+    try {
+      if (body.type !== "block_actions" || !body.message) return;
+
+      const channelId = body.channel?.id;
+      const messageTs = body.message.ts;
+      const threadTs: string | undefined =
+        body.message.thread_ts ?? body.message.ts;
+      if (!channelId || !messageTs || !threadTs) return;
+
+      const session = getSlackSession(threadTs, channelId);
+      if (!session?.sessionId) return;
+
+      // Tell the worker to resume
+      const io = getIO();
+      io.to(`session:${session.sessionId}`).emit("session:checkpoint_resume", {
+        sessionId: session.sessionId,
+      });
+
+      // Update message: remove buttons, show "Continuing..."
+      const blocks = (body.message.blocks as KnownBlock[]).filter(
+        (b) => b.type !== "actions",
+      );
+      blocks.push({
+        type: "section",
+        text: { type: "mrkdwn", text: "*Continuing...*" },
+      });
+
+      await client.chat.update({
+        channel: channelId,
+        ts: messageTs,
+        text: "Continuing...",
+        blocks,
+      });
+    } catch (error) {
+      logger.error("Error handling opticon_checkpoint_continue action", error);
+    }
+  });
+
+  // ---- Checkpoint: Stop ----------------------------------------------------
+  app.action("opticon_checkpoint_stop", async ({ ack, body, client, logger }) => {
+    await ack();
+    try {
+      if (body.type !== "block_actions" || !body.message) return;
+
+      const channelId = body.channel?.id;
+      const messageTs = body.message.ts;
+      const threadTs: string | undefined =
+        body.message.thread_ts ?? body.message.ts;
+      if (!channelId || !messageTs || !threadTs) return;
+
+      await stopSlackSession(threadTs, channelId);
+
+      await client.chat.update({
+        channel: channelId,
+        ts: messageTs,
+        text: "Session stopped at checkpoint.",
+        blocks: [
+          {
+            type: "section",
+            text: { type: "mrkdwn", text: "*Session stopped at checkpoint.*" },
+          },
+        ],
+      });
+    } catch (error) {
+      logger.error("Error handling opticon_checkpoint_stop action", error);
+    }
+  });
+
   // ---- Catch-all for future clarification/edit/modify/start actions -------
   app.action(/^opticon_clarify_/, async ({ ack, logger }) => {
     await ack();
@@ -387,8 +481,24 @@ export async function postCompletionToSlack(
     const duration =
       minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 
+    // Build per-task results from the session store
+    const panopticonSession = getSession(result.sessionId);
+    const taskResults: TaskResultLine[] = (panopticonSession?.todos ?? []).map(
+      (todo) => ({
+        description: todo.description,
+        status: todo.status === "completed" ? ("completed" as const) : ("failed" as const),
+        summary: todo.result?.slice(0, 80),
+      }),
+    );
+
     // Post the completion message
-    const blocks = buildCompletionMessage(result.summary, 1, 1, duration);
+    const blocks = buildCompletionMessage(
+      result.summary,
+      taskResults,
+      panopticonSession?.agents.length ?? 1,
+      duration,
+      result.sessionId,
+    );
     await app.client.chat.postMessage({
       channel: session.channelId,
       thread_ts: session.threadTs,
@@ -493,4 +603,56 @@ export async function postDestructiveConfirmToSlack(
       error,
     );
   }
+}
+
+/**
+ * Post a checkpoint message to the Slack thread when an agent reaches a
+ * step interval. Optionally uploads a thumbnail screenshot.
+ */
+export async function postCheckpointToSlack(
+  sessionId: string,
+  agentName: string,
+  step: number,
+  totalSteps: number,
+  thumbnailBase64?: string,
+  accomplishment?: string,
+): Promise<void> {
+  const app = getSlackApp();
+  if (!app) return;
+  const session = getSlackSessionBySessionId(sessionId);
+  if (!session) return;
+
+  let screenshotUrl: string | undefined;
+  if (thumbnailBase64) {
+    try {
+      const buf = Buffer.from(thumbnailBase64, "base64");
+      const upload = await app.client.files.uploadV2({
+        channel_id: session.channelId,
+        thread_ts: session.threadTs,
+        file: buf,
+        filename: `checkpoint-step-${step}.jpg`,
+        title: `Step ${step} screenshot`,
+      });
+      // files.uploadV2 returns the file info — extract permalink
+      const file = (upload as any).file ?? (upload as any).files?.[0];
+      screenshotUrl = file?.permalink_public ?? file?.permalink;
+    } catch {
+      // If upload fails, post without screenshot
+    }
+  }
+
+  const blocks = buildCheckpointMessage(
+    agentName,
+    step,
+    totalSteps,
+    screenshotUrl,
+    accomplishment,
+    sessionId,
+  );
+  await app.client.chat.postMessage({
+    channel: session.channelId,
+    thread_ts: session.threadTs,
+    text: `Checkpoint: ${agentName} at step ${step}/${totalSteps}`,
+    blocks,
+  });
 }

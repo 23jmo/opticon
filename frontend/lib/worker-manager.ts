@@ -6,6 +6,7 @@ import {
   getSession,
   updateAgentStatus,
 } from "./session-store";
+import { getSlackSessionBySessionId } from "./slack/session-adapter";
 import type { Agent } from "./types";
 
 // Track worker processes per session
@@ -35,6 +36,7 @@ export function spawnWorkers(sessionId: string, agentCount: number): void {
     addAgent(sessionId, agent);
 
     const pythonPath = process.env.PYTHON_PATH || "python3";
+    const slackSession = getSlackSessionBySessionId(sessionId);
     const workerProcess = spawn(pythonPath, ["workers/worker.py"], {
       cwd: PROJECT_ROOT,
       env: {
@@ -47,6 +49,8 @@ export function spawnWorkers(sessionId: string, agentCount: number): void {
         DEDALUS_API_KEY: process.env.DEDALUS_API_KEY || "",
         // Panopticon: Enable long-running mode for Panopticon sessions
         PANOPTICON_MODE: session.isPanopticon ? "true" : "false",
+        // Slack: enable step checkpoints when running from a Slack session
+        ...(slackSession ? { SLACK_SESSION: "true" } : {}),
       },
       stdio: ["pipe", "pipe", "pipe"],
     });

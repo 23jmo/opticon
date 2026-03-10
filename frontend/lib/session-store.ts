@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import type { Session, Todo, Agent } from "./types";
+import type { DecomposedTask } from "./orchestrator";
 import {
   persistAgent,
   persistAgentStatus,
@@ -40,16 +41,23 @@ export function getSession(id: string): Session | undefined {
   return sessions.get(id);
 }
 
-export function addTodos(sessionId: string, descriptions: string[]): Todo[] {
+export function addTodos(
+  sessionId: string,
+  items: string[] | DecomposedTask[],
+): Todo[] {
   const session = sessions.get(sessionId);
   if (!session) throw new Error(`Session ${sessionId} not found`);
 
-  const newTodos: Todo[] = descriptions.map((description) => ({
-    id: uuidv4(),
-    description,
-    status: "pending",
-    assignedTo: null,
-  }));
+  const newTodos: Todo[] = items.map((item) => {
+    const isDecomposed = typeof item !== "string";
+    return {
+      id: uuidv4(),
+      description: isDecomposed ? item.description : item,
+      status: "pending" as const,
+      assignedTo: null,
+      lane: isDecomposed ? item.lane : undefined,
+    };
+  });
 
   session.todos.push(...newTodos);
   return newTodos;
@@ -126,10 +134,52 @@ export function completeTask(
   return todo;
 }
 
-export function getNextPendingTask(sessionId: string): Todo | undefined {
+/**
+ * Get the next pending task an agent can work on.
+ *
+ * When `agentId` is provided and tasks have lanes, the agent is assigned to a
+ * lane and will only pick tasks from that lane. Tasks within a lane are
+ * sequential — a pending task is only available if no other task in the same
+ * lane is currently assigned (in-progress).
+ *
+ * Tasks without lanes (legacy / follow-ups) are available to any agent.
+ */
+export function getNextPendingTask(
+  sessionId: string,
+  agentId?: string,
+): Todo | undefined {
   const session = sessions.get(sessionId);
   if (!session) return undefined;
-  return session.todos.find((t) => t.status === "pending");
+
+  // Figure out which lane this agent is working in (if any)
+  let agentLane: number | undefined;
+  if (agentId) {
+    const agentTasks = session.todos.filter((t) => t.assignedTo === agentId);
+    agentLane = agentTasks.find((t) => t.lane !== undefined)?.lane;
+  }
+
+  // Lanes that currently have an assigned (in-progress) task — they're blocked
+  const blockedLanes = new Set<number>();
+  for (const t of session.todos) {
+    if (t.status === "assigned" && t.lane !== undefined) {
+      blockedLanes.add(t.lane);
+    }
+  }
+
+  return session.todos.find((t) => {
+    if (t.status !== "pending") return false;
+
+    // No lane — available to anyone
+    if (t.lane === undefined) return true;
+
+    // Lane is blocked by an in-progress task
+    if (blockedLanes.has(t.lane)) return false;
+
+    // If agent has an established lane, only pick from that lane
+    if (agentLane !== undefined) return t.lane === agentLane;
+
+    return true;
+  });
 }
 
 export function addAgent(sessionId: string, agent: Agent): void {
@@ -192,7 +242,7 @@ export function restoreSessionFromDb(dbSession: {
   prompt: string;
   agentCount: number;
   status: string;
-  userId: string;
+  userId: string | null;
   createdAt: Date | null;
   completedAt: Date | null;
   todos: Array<{ id: string; description: string; status: string; assignedTo: string | null; result: string | null }>;

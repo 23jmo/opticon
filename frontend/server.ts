@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import next from "next";
 import { Server } from "socket.io";
@@ -37,6 +38,7 @@ import type {
   AgentHeartbeatEvent,
   AgentPausedEvent,
   AgentSandboxExpiredEvent,
+  AgentCheckpointEvent,
 } from "./lib/types";
 import {
   persistTodoStatus,
@@ -48,12 +50,15 @@ import {
 } from "./lib/db/session-persist";
 import { persistReplay } from "./lib/db/replay-persist";
 import { decomposeTasks } from "./lib/orchestrator";
-import { createSlackApp } from "./lib/slack/app";
 import {
+  createSlackApp,
+  getSlackApp,
   postMilestoneToSlack,
   postCompletionToSlack,
   postErrorToSlack,
+  postCheckpointToSlack,
 } from "./lib/slack/app";
+import { summarizeActions, type BufferedAction } from "./lib/slack/summarize-actions";
 import {
   getSlackSessionBySessionId,
   completeSlackSession,
@@ -75,10 +80,16 @@ const stoppingSessions = new Set<string>();
 
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const STOP_TIMEOUT_MS = 30 * 1000; // 30 seconds max wait for worker cleanup
-const SLACK_MILESTONE_THROTTLE_MS = 15_000; // Min 15s between Slack milestone posts per session
+const SLACK_MILESTONE_THROTTLE_MS = 30_000; // Min 30s between Slack milestone posts per session
 
 /** Last Slack milestone post time per sessionId, for throttling */
 const lastSlackMilestone = new Map<string, number>();
+
+/** Recent reasoning entries per agent (ring buffer of 5), used for checkpoint summaries */
+const lastReasoningsByAgent = new Map<string, string[]>();
+
+/** Buffered tool actions per session, for LLM milestone summaries */
+const actionBuffer = new Map<string, BufferedAction[]>();
 
 app.prepare().then(() => {
   const httpServer = createServer(handler);
@@ -191,34 +202,7 @@ app.prepare().then(() => {
       console.error
     );
 
-    // Notify Slack if this session is linked to a thread
-    const slackSession = getSlackSessionBySessionId(sessionId);
-    if (slackSession) {
-      const whiteboard = getWhiteboard(sessionId);
-      const todoCount = session.todos.length;
-
-      // Collect GIF timelapses from all agents
-      const replayDir = process.env.REPLAY_DIR || resolve(process.cwd(), ".replays");
-      let gifPath: string | undefined;
-      for (const agent of session.agents) {
-        const agentGif = resolve(replayDir, sessionId, agent.id, "timelapse.gif");
-        if (existsSync(agentGif)) {
-          gifPath = agentGif; // Use the first available GIF (TODO: merge multi-agent GIFs)
-          break;
-        }
-      }
-
-      postCompletionToSlack({
-        sessionId,
-        threadTs: slackSession.threadTs,
-        channelId: slackSession.channelId,
-        summary: whiteboard || `Completed ${todoCount} task(s).`,
-        gifPath,
-      }).catch(console.error);
-      completeSlackSession(slackSession.threadTs, slackSession.channelId).catch(
-        console.error
-      );
-    }
+    // Slack notification already posted when tasks completed (see task:completed handler)
   }
 
   /**
@@ -277,7 +261,7 @@ app.prepare().then(() => {
     ).filter((a) => !a.currentTaskId);
 
     for (const agent of idleAgents) {
-      const nextTask = getNextPendingTask(sessionId);
+      const nextTask = getNextPendingTask(sessionId, agent.id);
       if (!nextTask) break;
 
       assignTask(sessionId, nextTask.id, agent.id);
@@ -407,8 +391,8 @@ app.prepare().then(() => {
         ).filter((a) => !a.currentTaskId).length;
         const targetCount = Math.max(idleAgentCount, 1);
 
-        const descriptions = await decomposeTasks(prompt, targetCount);
-        const newTodos = addTodos(sessionId, descriptions);
+        const decomposed = await decomposeTasks(prompt, targetCount);
+        const newTodos = addTodos(sessionId, decomposed);
 
         // Persist new todos
         persistTodos(sessionId, newTodos).catch(console.error);
@@ -461,7 +445,7 @@ app.prepare().then(() => {
       });
 
       // Assign first task to this agent
-      const nextTask = getNextPendingTask(sessionId);
+      const nextTask = getNextPendingTask(sessionId, agentId);
       if (nextTask) {
         assignTask(sessionId, nextTask.id, agentId);
         io.to(`session:${sessionId}`).emit("task:assigned", {
@@ -494,18 +478,32 @@ app.prepare().then(() => {
         toolArgs: data.toolArgs,
       });
 
-      // Post milestone to Slack (throttled: tool-use actions, max once per 15s per session)
-      if (data.toolName && getSlackSessionBySessionId(sessionId)) {
+      // Buffer tool actions for LLM-summarized Slack milestones (per agent)
+      if (data.toolName && data.toolName !== "screenshot" && getSlackSessionBySessionId(sessionId)) {
+        const agentKey = `${sessionId}:${data.agentId}`;
+        const buf = actionBuffer.get(agentKey) ?? [];
+        buf.push({
+          tool: data.toolName,
+          args: data.toolArgs as Record<string, unknown> | undefined,
+        });
+        actionBuffer.set(agentKey, buf);
+
+        // When throttle fires, summarize this agent's buffered actions and post to Slack
         const now = Date.now();
-        const last = lastSlackMilestone.get(sessionId) || 0;
+        const last = lastSlackMilestone.get(agentKey) || 0;
         if (now - last >= SLACK_MILESTONE_THROTTLE_MS) {
-          lastSlackMilestone.set(sessionId, now);
+          lastSlackMilestone.set(agentKey, now);
           const session = getSession(sessionId);
           const agent = session?.agents.find((a) => a.id === data.agentId);
           const agentName = agent?.name || `Agent ${data.agentId.slice(0, 6)}`;
-          postMilestoneToSlack(sessionId, agentName, data.action).catch(
-            console.error
-          );
+
+          // Drain this agent's buffer and summarize via Haiku
+          const actions = actionBuffer.get(agentKey) ?? [];
+          actionBuffer.set(agentKey, []);
+
+          summarizeActions(actions)
+            .then((summary) => postMilestoneToSlack(sessionId, agentName, summary))
+            .catch(console.error);
         }
       }
     });
@@ -513,6 +511,20 @@ app.prepare().then(() => {
     socket.on("agent:reasoning", (data: AgentReasoningEvent) => {
       const sessionId = findSessionId(socket);
       if (!sessionId) return;
+
+      // Buffer reasoning in ring buffer (last 5) for checkpoint summaries
+      const reasoningBufKey = `${sessionId}:${data.agentId}`;
+      const reasoningEntries = lastReasoningsByAgent.get(reasoningBufKey) ?? [];
+      reasoningEntries.push(data.reasoning);
+      if (reasoningEntries.length > 5) reasoningEntries.shift();
+      lastReasoningsByAgent.set(reasoningBufKey, reasoningEntries);
+
+      // Attach reasoning to the most recent buffered action for richer LLM context
+      const agentBufKey = `${sessionId}:${data.agentId}`;
+      const buf = actionBuffer.get(agentBufKey);
+      if (buf && buf.length > 0) {
+        buf[buf.length - 1].reasoning = data.reasoning;
+      }
 
       io.to(`session:${sessionId}`).emit("agent:reasoning", {
         agentId: data.agentId,
@@ -579,6 +591,32 @@ app.prepare().then(() => {
       console.log(`[server] Agent ${agentId} sandbox expired`);
     });
 
+    socket.on("agent:checkpoint", (data: AgentCheckpointEvent) => {
+      const sessionId = findSessionId(socket);
+      if (!sessionId) return;
+
+      const slackSession = getSlackSessionBySessionId(sessionId);
+      if (!slackSession) return;
+
+      const session = getSession(sessionId);
+      const agent = session?.agents.find((a) => a.id === data.agentId);
+      const agentName = agent?.name || `Agent ${data.agentId.slice(0, 8)}`;
+
+      // Build accomplishment summary from recent reasoning entries
+      const reasoningKey = `${sessionId}:${data.agentId}`;
+      const recentReasoning = lastReasoningsByAgent.get(reasoningKey) ?? [];
+      const accomplishmentSummary = recentReasoning.join(" ").slice(0, 300) || undefined;
+
+      postCheckpointToSlack(
+        sessionId,
+        agentName,
+        data.step,
+        data.totalSteps,
+        data.thumbnail,
+        accomplishmentSummary,
+      ).catch(console.error);
+    });
+
     socket.on("agent:error", (data: AgentErrorEvent) => {
       const sessionId = findSessionId(socket);
       if (!sessionId) return;
@@ -628,7 +666,7 @@ app.prepare().then(() => {
       }
 
       // Try to assign next task
-      const nextTask = getNextPendingTask(sessionId);
+      const nextTask = getNextPendingTask(sessionId, agentId);
       if (nextTask) {
         assignTask(sessionId, nextTask.id, agentId);
         io.to(`session:${sessionId}`).emit("task:assigned", {
@@ -652,6 +690,27 @@ app.prepare().then(() => {
 
         // Start 5-min idle timer (agents stay alive for follow-ups)
         startIdleTimer(sessionId);
+
+        // Post completion to Slack immediately and shut down workers
+        // so the GIF saves and uploads without waiting for the 5-min idle timer
+        const slackSession = getSlackSessionBySessionId(sessionId);
+        if (slackSession) {
+          const whiteboard = getWhiteboard(sessionId);
+          const todoCount = getSession(sessionId)?.todos.length ?? 0;
+          postCompletionToSlack({
+            sessionId,
+            threadTs: slackSession.threadTs,
+            channelId: slackSession.channelId,
+            summary: whiteboard || `Completed ${todoCount} task(s).`,
+          }).catch(console.error);
+          completeSlackSession(slackSession.threadTs, slackSession.channelId).catch(
+            console.error
+          );
+
+          // Tell workers to shut down now — triggers finally block which saves GIF
+          clearIdleTimer(sessionId);
+          io.to(room).emit("task:none");
+        }
       }
       // Otherwise: no pending tasks but session not complete — agent idles
     });
@@ -691,6 +750,31 @@ app.prepare().then(() => {
         manifestUrl,
         frameCount,
       });
+
+      // Upload GIF to Slack thread if this session is linked
+      const slackSession = getSlackSessionBySessionId(sessionId);
+      if (slackSession) {
+        const replayDir = process.env.REPLAY_DIR || resolve(process.cwd(), ".replays");
+        const agentGif = resolve(replayDir, sessionId, agentId, "timelapse.gif");
+        if (existsSync(agentGif)) {
+          try {
+            const slackApp = getSlackApp();
+            if (slackApp) {
+              const fileContent = await readFile(agentGif);
+              await slackApp.client.files.uploadV2({
+                channel_id: slackSession.channelId,
+                thread_ts: slackSession.threadTs,
+                file: fileContent,
+                filename: `timelapse-${agentId.slice(0, 8)}.gif`,
+                title: `Agent ${agentId.slice(0, 8)} Timelapse`,
+              });
+              console.log(`[server] Session ${sessionId} — GIF uploaded to Slack`);
+            }
+          } catch (err) {
+            console.error(`[server] Failed to upload GIF to Slack:`, err);
+          }
+        }
+      }
     });
 
     socket.on("agent:terminated", (data: AgentTerminatedEvent) => {
