@@ -97,11 +97,10 @@ export default function PanopticonPage() {
       });
     });
 
-    socket.on("agent:thumbnail", (data: { agentId: string; thumbnail: string; timestamp: number }) => {
+    socket.on("agent:thumbnail", (data: { agentId: string; thumbnail: string }) => {
       setThumbnails(prev => new Map(prev).set(data.agentId, {
         agentId: data.agentId,
         thumbnail: data.thumbnail,
-        timestamp: data.timestamp,
       }));
     });
 

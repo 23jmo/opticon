@@ -90,7 +90,7 @@ function registerEventHandlers(app: App): void {
 
       const threadTs = event.thread_ts ?? event.ts;
       const channelId = event.channel;
-      const slackUserId = event.user;
+      const slackUserId = event.user ?? "unknown";
       const teamId = event.team ?? "unknown";
 
       // If a session already exists for this thread, treat as follow-up context
