@@ -66,12 +66,13 @@ describe("session-store", () => {
       }
     });
 
-    it("sets session status to running", () => {
+    it("does not transition session status (approval flow handles that)", () => {
       store.createSession("s4", "prompt", 1);
       store.addTodos("s4", ["Task A"]);
 
       const session = store.getSession("s4");
-      expect(session!.status).toBe("running");
+      // addTodos no longer transitions status; approveSession does
+      expect(session!.status).toBe("decomposing");
     });
 
     it("throws when session does not exist", () => {
@@ -99,7 +100,7 @@ describe("session-store", () => {
 
       const session = store.getSession("s5")!;
       const agent = session.agents.find((a) => a.id === "agent-1");
-      expect(agent!.status).toBe("working");
+      expect(agent!.status).toBe("active");
       expect(agent!.currentTaskId).toBe(todo.id);
     });
   });
@@ -129,7 +130,7 @@ describe("session-store", () => {
       expect(agent!.currentTaskId).toBeNull();
     });
 
-    it("sets session status to completed when all todos are done", () => {
+    it("does not auto-complete session (server layer handles that)", () => {
       store.createSession("s7", "p", 1);
       const todos = store.addTodos("s7", ["A", "B"]);
       store.addAgent("s7", {
@@ -142,14 +143,14 @@ describe("session-store", () => {
       store.assignTask("s7", todos[0].id, "agent-3");
       store.completeTask("s7", todos[0].id);
 
-      // Session should still be running — one todo left
-      expect(store.getSession("s7")!.status).toBe("running");
+      // Session status unchanged — server.ts manages completion transitions
+      expect(store.getSession("s7")!.status).toBe("decomposing");
 
       store.assignTask("s7", todos[1].id, "agent-3");
       store.completeTask("s7", todos[1].id);
 
-      // Now all done
-      expect(store.getSession("s7")!.status).toBe("completed");
+      // Still unchanged — completeTask only updates the todo and agent
+      expect(store.getSession("s7")!.status).toBe("decomposing");
     });
   });
 
