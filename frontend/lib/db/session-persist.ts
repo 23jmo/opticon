@@ -39,6 +39,7 @@ export async function persistTodos(sessionId: string, todoList: Todo[]) {
       status: todo.status,
       assignedTo: todo.assignedTo || null,
       result: todo.result || null,
+      lane: todo.lane ?? null,
     }))
   );
 }
@@ -60,6 +61,7 @@ export async function replaceTodos(sessionId: string, todoList: Todo[]) {
         status: todo.status,
         assignedTo: todo.assignedTo || null,
         result: todo.result || null,
+        lane: todo.lane ?? null,
       }))
     );
   }
@@ -68,6 +70,13 @@ export async function replaceTodos(sessionId: string, todoList: Todo[]) {
 /**
  * Update session status and optionally set completion time
  */
+export async function persistAgentCount(sessionId: string, agentCount: number) {
+  await db
+    .update(sessions)
+    .set({ agentCount })
+    .where(eq(sessions.id, sessionId));
+}
+
 export async function persistSessionStatus(
   sessionId: string,
   status: string,

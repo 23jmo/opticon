@@ -57,6 +57,14 @@ export interface MilestoneUpdate {
   timestamp: string;
 }
 
+/** Per-task result line for the completion message. */
+export interface TaskResultLine {
+  description: string;
+  status: "completed" | "failed" | "skipped";
+  /** One-line result summary, truncated to ~80 chars. */
+  summary?: string;
+}
+
 /** Result payload delivered to Slack when a task completes. */
 export interface SlackTaskResult {
   /** Panopticon session ID. */

@@ -32,16 +32,17 @@ export async function POST(request: NextRequest) {
     const sessionId = `panopticon-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const userId = authSession.user.id;
 
-    // Use Dedalus to decompose the prompt into tasks
-    const taskList = await decomposeTasks(prompt, agentCount);
+    // Use Dedalus to decompose the prompt into tasks grouped by lane
+    const decomposed = await decomposeTasks(prompt, agentCount);
 
     // Convert to Todo format
-    const todos: Todo[] = taskList.map((task, index) => ({
+    const todos: Todo[] = decomposed.map((task, index) => ({
       id: `task-${sessionId}-${index + 1}`,
-      description: task,
+      description: task.description,
       status: "pending" as const,
       assignedTo: null,
       result: undefined,
+      lane: task.lane,
     }));
 
     // Store in memory

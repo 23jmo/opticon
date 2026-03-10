@@ -43,6 +43,7 @@ RETRY_BASE_DELAY = 2  # seconds
 HISTORY_KEEP_RECENT = 10  # number of recent screenshot/action exchanges to keep verbatim
 THUMBNAIL_INTERVAL_SECONDS = 10
 MIN_STEPS_BEFORE_DONE = 3  # agent must take at least this many actions before calling done
+CHECKPOINT_INTERVAL = 100  # Pause every N steps for user check-in (Slack only)
 
 
 def make_screenshot_message():
@@ -137,7 +138,7 @@ def trim_message_history(messages):
     ] + recent_part
 
 
-async def run_agent_loop(client, task_description, whiteboard_content="", user_memories="", on_step=None, replay_buffer=None, terminated=None, on_screenshot=None):
+async def run_agent_loop(client, task_description, whiteboard_content="", user_memories="", on_step=None, replay_buffer=None, terminated=None, on_screenshot=None, on_checkpoint=None):
     """
     Observe-think-act loop using Dedalus chat.completions.create().
 
@@ -164,12 +165,19 @@ async def run_agent_loop(client, task_description, whiteboard_content="", user_m
 
     last_action_label = "Starting task"
     no_tool_retries = 0
+    raw_png = None  # Track latest screenshot for checkpoint thumbnails
 
     for step in range(MAX_STEPS):
         # Check for termination between steps
         if terminated is not None and terminated.is_set():
             logger.info("Terminated during task at step %d", step)
             return "(terminated by user)"
+
+        # Checkpoint: pause every CHECKPOINT_INTERVAL steps for Slack check-in
+        if on_checkpoint and step > 0 and step % CHECKPOINT_INTERVAL == 0:
+            result = await on_checkpoint(step, raw_png)
+            if result == "terminated":
+                return "(terminated by user at checkpoint)"
 
         # Trim old exchanges to keep context window lean
         trim_message_history(messages)
@@ -318,6 +326,13 @@ async def main():
     async def on_session_complete(data=None):
         terminated.set()
 
+    # Checkpoint resume signal (Slack user clicked Continue)
+    checkpoint_resume = asyncio.Event()
+
+    @sio.on("session:checkpoint_resume")
+    async def on_checkpoint_resume(data=None):
+        checkpoint_resume.set()
+
     # --- Boot or reconnect E2B sandbox ---
     desktop = None
     reconnect_sandbox_id = os.environ.get("SANDBOX_ID")
@@ -437,17 +452,19 @@ async def main():
             async def on_step(step, name, args, reasoning=None):
                 logger.info("  Step %d: %s(%s)", step, name, args)
                 action_id = f"{agent_id}-{step}-{task_id}"
+                # Emit reasoning BEFORE thinking so the server can attach it
+                # to the buffered action before the throttle fires
+                if reasoning:
+                    await emit("agent:reasoning", {
+                        "reasoning": reasoning,
+                        "actionId": action_id,
+                    })
                 await emit("agent:thinking", {
                     "action": f"Tool: {name}",
                     "actionId": action_id,
                     "toolName": name,
                     "toolArgs": args,
                 })
-                if reasoning:
-                    await emit("agent:reasoning", {
-                        "reasoning": reasoning,
-                        "actionId": action_id,
-                    })
 
             async def on_screenshot(raw_png):
                 nonlocal _last_thumbnail_time
@@ -460,6 +477,25 @@ async def main():
                     except Exception as e:
                         logger.warning("Failed to emit thumbnail: %s", e)
 
+            # Checkpoint callback — only active for Slack sessions
+            is_slack_session = os.environ.get("SLACK_SESSION") == "true"
+
+            async def on_checkpoint(step, raw_png):
+                """Emit checkpoint event and block until user responds."""
+                thumb = ReplayBuffer.make_thumbnail(raw_png) if raw_png else None
+                await emit("agent:checkpoint", {
+                    "step": step,
+                    "totalSteps": MAX_STEPS,
+                    "thumbnail": thumb,
+                })
+                logger.info("Checkpoint at step %d — waiting for user", step)
+                checkpoint_resume.clear()
+                while not checkpoint_resume.is_set() and not terminated.is_set():
+                    await asyncio.sleep(1.0)
+                if terminated.is_set():
+                    return "terminated"
+                return "continue"
+
             try:
                 result = await run_agent_loop(
                     client, task_description,
@@ -469,6 +505,7 @@ async def main():
                     replay_buffer=replay_buffer,
                     terminated=terminated,
                     on_screenshot=on_screenshot,
+                    on_checkpoint=on_checkpoint if is_slack_session else None,
                 )
             except (ConnectionError, TimeoutError, OSError) as e:
                 # E2B sandbox expired or connection lost

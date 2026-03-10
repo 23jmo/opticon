@@ -16,6 +16,7 @@ import {
   persistSession,
   persistTodos,
   persistSessionStatus,
+  persistAgentCount,
 } from "../db/session-persist";
 
 // ---------------------------------------------------------------------------
@@ -69,7 +70,8 @@ export async function createSlackSession(
   slackSessions.set(threadKey(channelId, threadTs), slackSession);
 
   // Register in the Panopticon in-memory session store
-  createSession(sessionId, prompt, agentCount, slackUserId);
+  // No userId — Slack-originated sessions are viewable by anyone on the dashboard
+  createSession(sessionId, prompt, agentCount);
 
   // Persist to database
   await persistSession(sessionId, null, prompt, agentCount, "clarifying");
@@ -100,18 +102,31 @@ export async function decomposeSlackSession(
     throw new Error(`Panopticon session ${slackSession.sessionId} not found`);
   }
 
-  // Decompose the prompt into independent tasks
-  const descriptions = await decomposeTasks(session.prompt, session.agentCount);
+  // Let the LLM break the request into granular tasks grouped by lane
+  const MAX_SLACK_LANES = 4;
+  const decomposed = await decomposeTasks(
+    session.prompt,
+    undefined,
+    10,
+    MAX_SLACK_LANES,
+  );
+
+  // One agent per lane
+  const laneCount = new Set(decomposed.map((t) => t.lane)).size;
+  session.agentCount = Math.max(laneCount, 1);
 
   // Add tasks to the in-memory session store
-  const todos = addTodos(slackSession.sessionId, descriptions);
+  const todos = addTodos(slackSession.sessionId, decomposed);
+  const descriptions = decomposed.map((t) => t.description);
 
   // Persist tasks to the database
   await persistTodos(slackSession.sessionId, todos);
 
   // Mark as pending approval — workers are NOT spawned yet
+  // Also persist the updated agent count (LLM may have chosen > 1)
   slackSession.status = "pending_approval";
   await persistSessionStatus(slackSession.sessionId, "pending_approval");
+  await persistAgentCount(slackSession.sessionId, session.agentCount);
 
   return { descriptions };
 }
